@@ -118,7 +118,7 @@ export class AllyVanguard extends Creep {
 
         // Otherwise say the intention and create a moveRequest to the creep's harvestPos, and inform the attempt
 
-        this.message = `⏩ ${sourceIndex}`
+        this.message = `⏩ ${sourceIndex}@${harvestPos.roomName}:${harvestPos.x},${harvestPos.y}`
 
         this.createMoveRequest({
             origin: this.pos,

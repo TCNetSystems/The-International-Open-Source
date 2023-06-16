@@ -34,8 +34,8 @@ export class SourceHarvester extends Creep {
         if (
             this.ticksToLive >
             this.body.length * CREEP_SPAWN_TIME +
-                this.room.memory[RoomMemoryKeys.communeSourcePaths][this.memory[CreepMemoryKeys.sourceIndex]].length /
-                    packedPosLength
+            this.room.memory[RoomMemoryKeys.communeSourcePaths][this.memory[CreepMemoryKeys.sourceIndex]].length /
+            packedPosLength
         )
             return false
 
@@ -57,7 +57,7 @@ export class SourceHarvester extends Creep {
         }
     }
 
-    buildContainer?() {}
+    buildContainer?() { }
 
     travelToSource?(): number {
         this.message = '🚬'
@@ -79,7 +79,7 @@ export class SourceHarvester extends Creep {
 
         // Otherwise say the intention and create a moveRequest to the creep's harvestPos, and inform the attempt
 
-        this.message = `⏩${this.memory[CreepMemoryKeys.sourceIndex]}`
+        this.message = `⏩${this.memory[CreepMemoryKeys.sourceIndex]}@${harvestPos.x},${harvestPos.y}`
 
         if (!this.room.memory[RoomMemoryKeys.communeSourcePaths][this.memory[CreepMemoryKeys.sourceIndex]]) {
 
