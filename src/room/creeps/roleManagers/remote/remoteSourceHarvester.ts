@@ -36,10 +36,10 @@ export class RemoteHarvester extends Creep {
             if (
                 this.ticksToLive >
                 this.body.length * CREEP_SPAWN_TIME +
-                    Memory.rooms[this.memory[CreepMemoryKeys.remote]][RoomMemoryKeys.remoteSourcePaths][
-                        this.memory[CreepMemoryKeys.sourceIndex]
-                    ].length /
-                        packedPosLength
+                Memory.rooms[this.memory[CreepMemoryKeys.remote]][RoomMemoryKeys.remoteSourcePaths][
+                    this.memory[CreepMemoryKeys.sourceIndex]
+                ].length /
+                packedPosLength
             )
                 return false
         } else if (this.ticksToLive > this.body.length * CREEP_SPAWN_TIME) return false
@@ -147,11 +147,11 @@ export class RemoteHarvester extends Creep {
         if (this.travelToSource(sourceIndex) !== RESULT_SUCCESS) return
 
         // Make sure we're a bit ahead source regen time
-/*
-        const sourcee = this.room.roomManager.remoteSources[this.memory[CreepMemoryKeys.sourceIndex]]
+        /*
+                const sourcee = this.room.roomManager.remoteSources[this.memory[CreepMemoryKeys.sourceIndex]]
 
-        this.room.visual.text((sourcee.energy * ENERGY_REGEN_TIME).toString() + ', ' + (sourcee.ticksToRegeneration * 0.9 * sourcee.energyCapacity).toString(), this.pos)
- */
+                this.room.visual.text((sourcee.energy * ENERGY_REGEN_TIME).toString() + ', ' + (sourcee.ticksToRegeneration * 0.9 * sourcee.energyCapacity).toString(), this.pos)
+         */
 
         const container = this.room.sourceContainers[sourceIndex]
         if (container) {
@@ -284,7 +284,7 @@ export class RemoteHarvester extends Creep {
 
         // Otherwise say the intention and create a moveRequest to the creep's harvestPos, and inform the attempt
 
-        this.message = `⏩ ` + sourceIndex
+        this.message = `⏩ ` + sourceIndex + `@${this.actionCoord.x},${this.actionCoord.y}`
 
         this.createMoveRequestByPath(
             {
@@ -299,7 +299,7 @@ export class RemoteHarvester extends Creep {
             {
                 packedPath: reversePosList(
                     Memory.rooms[this.memory[CreepMemoryKeys.remote]][RoomMemoryKeys.remoteSourcePaths][
-                        this.memory[CreepMemoryKeys.sourceIndex]
+                    this.memory[CreepMemoryKeys.sourceIndex]
                     ],
                 ),
                 remoteName: this.memory[CreepMemoryKeys.remote],
@@ -353,7 +353,7 @@ export class RemoteHarvester extends Creep {
 
             const sourcePos = unpackPosAt(
                 Memory.rooms[creep.memory[CreepMemoryKeys.remote]][RoomMemoryKeys.remoteSourceHarvestPositions][
-                    creep.memory[CreepMemoryKeys.sourceIndex]
+                creep.memory[CreepMemoryKeys.sourceIndex]
                 ],
             )
 
@@ -379,7 +379,7 @@ export class RemoteHarvester extends Creep {
                 {
                     packedPath: reversePosList(
                         Memory.rooms[creep.memory[CreepMemoryKeys.remote]][RoomMemoryKeys.remoteSourcePaths][
-                            creep.memory[CreepMemoryKeys.sourceIndex]
+                        creep.memory[CreepMemoryKeys.sourceIndex]
                         ],
                     ),
                     remoteName: creep.memory[CreepMemoryKeys.remote],
