@@ -149,7 +149,7 @@ export const settings: Settings = {
     marketUsage: true,
     logging: false,
     creepSay: true,
-    creepChant: true,
+    creepChant: false,
     simpleAlliesSegment: 90,
     errorExporting: false,
     structureMigration: true,
