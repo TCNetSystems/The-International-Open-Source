@@ -115,9 +115,8 @@ export class SpawningStructuresManager {
         if (request.cost > this.communeManager.room.energyCapacityAvailable) {
             customLog(
                 'Failed to spawn',
-                `cost greater then energyCapacityAvailable, role: ${request.role}, cost: ${
-                    this.communeManager.room.energyCapacityAvailable
-                } / ${request.cost}, body: ${JSON.stringify(request.bodyPartCounts)}`,
+                `cost greater then energyCapacityAvailable, role: ${request.role}, cost: ${this.communeManager.room.energyCapacityAvailable
+                } / ${request.cost}, body: ${JSON.stringify(request.bodyPartCounts)}, loc: ${this.communeManager.room.name}`,
                 {
                     textColor: customColors.white,
                     bgColor: customColors.red,
@@ -130,9 +129,8 @@ export class SpawningStructuresManager {
         if (request.cost > this.communeManager.nextSpawnEnergyAvailable) {
             customLog(
                 'Failed to spawn',
-                `cost greater then nextSpawnEnergyAvailable, role: ${request.role}, cost: ${
-                    this.communeManager.nextSpawnEnergyAvailable
-                } / ${request.cost}, body: ${JSON.stringify(request.bodyPartCounts)}`,
+                `cost greater then nextSpawnEnergyAvailable, role: ${request.role}, cost: ${this.communeManager.nextSpawnEnergyAvailable
+                } / ${request.cost}, body: ${JSON.stringify(request.bodyPartCounts)}, loc: ${this.communeManager.room.name}`,
                 {
                     textColor: customColors.white,
                     bgColor: customColors.red,
@@ -698,5 +696,5 @@ export class SpawningStructuresManager {
         }
     }
 
-    private testRequests() {}
+    private testRequests() { }
 }
