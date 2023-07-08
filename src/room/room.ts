@@ -1,6 +1,6 @@
 import {
     CreepMemoryKeys,
-    RESULT_FAIL,
+    Result,
     RoomMemoryKeys,
     RoomTypes,
     adjacentOffsets,
@@ -13,6 +13,7 @@ import {
     maxControllerLevel,
     powerCreepClassNames,
     preferredCommuneRange,
+    quadAttackMemberOffsets,
     remoteTypeWeights,
     roomDimensions,
     roomTypesUsedForStats,
@@ -163,12 +164,9 @@ export class RoomManager {
         // Check if the room is a commune
 
         if (!room.controller) return
-
         if (!room.controller.my) {
             if (roomMemory[RoomMemoryKeys.type] === RoomTypes.commune) {
                 roomMemory[RoomMemoryKeys.type] = RoomTypes.neutral
-
-                room.basicScout()
                 cleanRoomMemory(room.name)
             }
             return
@@ -267,7 +265,11 @@ export class RoomManager {
         return sourceHarvestPositions.map(positions => packPosList(positions))
     }
 
-    findRemoteSourcePaths(commune: Room, packedRemoteSourceHarvestPositions: string[]) {
+    findRemoteSourceFastFillerPaths(
+        commune: Room,
+        packedRemoteSourceHarvestPositions: string[],
+        pathsThrough: Set<string>,
+    ) {
         const anchor = commune.roomManager.anchor
         if (!anchor) throw Error('No anchor for remote source harvest paths' + this.room.name)
 
@@ -283,6 +285,47 @@ export class RoomManager {
                 weightStructurePlans: true,
                 avoidStationaryPositions: true,
             })
+
+            for (const pos of path) {
+                pathsThrough.add(pos.roomName)
+            }
+
+            sourcePaths.push(path)
+        }
+        /*
+        for (const index in sourcePaths) {
+            const path = sourcePaths[index]
+            if (!path.length) throw Error('no source path found for index ' + index + ' for ' + this.room.name + ', ' + JSON.stringify(sourcePaths) + ', ' + packedRemoteSourceHarvestPositions)
+        }
+ */
+        return sourcePaths.map(path => packPosList(path))
+    }
+
+    findRemoteSourceHubPaths(
+        commune: Room,
+        packedRemoteSourceHarvestPositions: string[],
+        pathsThrough: Set<string>,
+    ) {
+        const stampAnchors = commune.roomManager.stampAnchors
+        if (!stampAnchors) throw Error('no stampAnchors for ' + commune.name)
+
+        const hubAnchor = new RoomPosition(stampAnchors.hub[0].x, stampAnchors.hub[0].y, commune.name)
+        const sourcePaths: RoomPosition[][] = []
+
+        for (const positions of packedRemoteSourceHarvestPositions) {
+            const origin = unpackPosAt(positions, 0)
+            const path = customFindPath({
+                origin,
+                goals: [{ pos: hubAnchor, range: 1 }],
+                typeWeights: remoteTypeWeights,
+                plainCost: defaultRoadPlanningPlainCost,
+                weightStructurePlans: true,
+                avoidStationaryPositions: true,
+            })
+
+            for (const pos of path) {
+                pathsThrough.add(pos.roomName)
+            }
 
             sourcePaths.push(path)
         }
@@ -327,7 +370,11 @@ export class RoomManager {
         return packPosList(positions)
     }
 
-    findRemoteControllerPath(commune: Room, packedRemoteControllerPositions: string) {
+    findRemoteControllerPath(
+        commune: Room,
+        packedRemoteControllerPositions: string,
+        pathsThrough: Set<string>,
+    ) {
         const anchor = commune.roomManager.anchor
         if (!anchor) throw Error('No anchor for remote controller path' + this.room.name)
 
@@ -340,13 +387,21 @@ export class RoomManager {
             weightStructurePlans: true,
             avoidStationaryPositions: true,
         })
-        if (!path.length) throw Error('No remote controller path for ' + this.room.name)
+
+        for (const pos of path) {
+            pathsThrough.add(pos.roomName)
+        }
 
         return packPosList(path)
     }
 
     isStartRoom() {
-        return this.room.controller.my && this.room.controller.safeMode && global.communes.size <= 1
+        return (
+            global.communes.size === 1 &&
+            this.room.controller.my &&
+            this.room.controller.safeMode &&
+            global.communes.has(this.room.name)
+        )
     }
 
     _anchor: RoomPosition
@@ -525,7 +580,7 @@ export class RoomManager {
     get remoteSourcePaths() {
         if (this._remoteSourcePaths) return this._remoteSourcePaths
 
-        const packedSourcePaths = this.room.memory[RoomMemoryKeys.remoteSourcePaths]
+        const packedSourcePaths = this.room.memory[RoomMemoryKeys.remoteSourceFastFillerPaths]
         if (packedSourcePaths) {
             return (this._remoteSourcePaths = packedSourcePaths.map(positions =>
                 unpackPosList(positions),
@@ -809,6 +864,11 @@ export class RoomManager {
 
         delete this._structureCoords
 
+        const communeManager = this.room.communeManager
+        if (communeManager) {
+            delete communeManager._fastFillerSpawnEnergyCapacity
+        }
+
         if (!newAllStructures) newAllStructures = this.room.find(FIND_STRUCTURES)
 
         this.allStructureIDs = newAllStructures.map(structure => structure.id)
@@ -934,5 +994,74 @@ export class RoomManager {
             this._cSites[cSite.structureType].push(cSite)
 
         return this._cSites
+    }
+
+    _enemyCreepPositions: { [packedCoord: string]: Id<Creep> }
+    get enemyCreepPositions() {
+        const enemyCreepPositions: { [packedCoord: string]: Id<Creep> } = {}
+
+        for (const creep of this.room.enemyCreeps) {
+            const packedCoord = packCoord(creep.pos)
+            enemyCreepPositions[packedCoord] = creep.id
+        }
+
+        return (this._enemyCreepPositions = enemyCreepPositions)
+    }
+
+    _enemySquadData: EnemySquadData
+    get enemySquadData() {
+        if (this._enemySquadData) return this._enemySquadData
+
+        const highestEnemySquadData: EnemySquadData = {
+            highestMeleeDamage: 0,
+            highestRangedDamage: 0,
+            highestHeal: 0,
+            highestDismantle: 0,
+        }
+        const enemyCreeps = this.room.enemyCreeps
+        if (!enemyCreeps.length) return (this._enemySquadData = highestEnemySquadData)
+
+        const enemyCreepIDs = new Set(enemyCreeps.map(creep => creep.id))
+
+        // For each creep, makeup a quad of creep around them
+
+        for (const creepID of enemyCreepIDs) {
+            const creep = findObjectWithID(creepID)
+            const squadData: EnemySquadData = {
+                highestMeleeDamage: 0,
+                highestRangedDamage: 0,
+                highestHeal: 0,
+                highestDismantle: 0,
+            }
+
+            for (const offset of quadAttackMemberOffsets) {
+                const coord = {
+                    x: creep.pos.x + offset.x,
+                    y: creep.pos.y + offset.y,
+                }
+
+                const creepIDAtPos = this.enemyCreepPositions[packCoord(coord)]
+                if (!creepIDAtPos) continue
+
+                const creepAtPos = findObjectWithID(creepIDAtPos)
+                const creepAtPosCombatStrength = creepAtPos.combatStrength
+
+                squadData.highestMeleeDamage +=
+                    creepAtPosCombatStrength.melee + creepAtPosCombatStrength.ranged
+                squadData.highestRangedDamage += creepAtPosCombatStrength.ranged
+                squadData.highestHeal += creepAtPosCombatStrength.heal
+                squadData.highestDismantle += creepAtPosCombatStrength.dismantle
+            }
+
+            for (let x in squadData) {
+                const key = x as keyof EnemySquadData
+
+                if (squadData[key] <= highestEnemySquadData[key]) continue
+
+                highestEnemySquadData[key] = this.enemySquadData[key]
+            }
+        }
+
+        return (this._enemySquadData = highestEnemySquadData)
     }
 }

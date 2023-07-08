@@ -23,12 +23,11 @@ import {
     unpackNumAsCoord,
     findLowestScore,
     roundTo,
-    findDynamicScore,
 } from 'international/utils'
 import { TerminalManager } from './terminal/terminal'
 import './spawning/spawningStructures'
 
-import './combat'
+import './defence'
 import './workRequest'
 import './combatRequest'
 import {
@@ -61,7 +60,7 @@ import { PowerSpawningStructuresManager } from './powerSpawn'
 import './haulerSize'
 import { SourceManager } from './sourceManager'
 import { TowerManager } from './towers'
-import { CombatManager } from './combat'
+import { DefenceManager } from './defence'
 import { SpawningStructuresManager } from './spawning/spawningStructures'
 import { HaulRequestManager } from './haulRequestManager'
 import { HaulerSizeManager } from './haulerSize'
@@ -81,7 +80,7 @@ import { profiler } from 'other/profiler'
 import { FactoryManager } from './factory'
 import { SpawnRequestsManager } from './spawning/spawnRequests'
 import { ObserverManager } from './observer'
-import { encode } from 'base32768'
+import { decode, encode } from 'base32768'
 import { BasePlans } from '../construction/basePlans'
 import { internationalManager } from 'international/international'
 import { ConstructionManager } from 'room/construction/construction'
@@ -91,7 +90,7 @@ import { has } from 'lodash'
 export class CommuneManager {
     // Managers
     constructionManager: ConstructionManager
-    combatManager: CombatManager
+    defenceManager: DefenceManager
 
     towerManager: TowerManager
     storingStructuresManager: StoringStructuresManager
@@ -123,10 +122,14 @@ export class CommuneManager {
      * Organized by remote and sourceIndex
      */
     remoteSourceHarvesters: { [remote: string]: string[][] }
+    /**
+     * The total amount of carry parts for hauler and remoteHaulers
+     */
+    haulerCarryParts: number
 
     constructor() {
         this.constructionManager = new ConstructionManager(this)
-        this.combatManager = new CombatManager(this)
+        this.defenceManager = new DefenceManager(this)
 
         this.towerManager = new TowerManager(this)
         this.storingStructuresManager = new StoringStructuresManager(this)
@@ -164,6 +167,7 @@ export class CommuneManager {
             delete this._minRampartHits
             delete this._upgradeStructure
             delete this._storedEnergyBuildThreshold
+            delete this._hasSufficientRoads
         }
 
         this.room = room
@@ -171,7 +175,7 @@ export class CommuneManager {
 
         // If we should abandon the room
 
-        if (roomMemory[RoomMemoryKeys.abandoned] === true) {
+        if (roomMemory[RoomMemoryKeys.abandonCommune] === true) {
             room.controller.unclaim()
             roomMemory[RoomMemoryKeys.type] = RoomTypes.neutral
             cleanRoomMemory(room.name)
@@ -184,6 +188,8 @@ export class CommuneManager {
 
         roomMemory[RoomMemoryKeys.type] = RoomTypes.commune
         global.communes.add(room.name)
+
+        if (this.room.controller.safeMode) internationalManager.safemodedCommuneName = this.room.name
 
         if (!roomMemory[RoomMemoryKeys.greatestRCL]) {
             if (global.communes.size <= 1)
@@ -215,6 +221,7 @@ export class CommuneManager {
         room.usedRampartIDs = new Map()
 
         room.creepsOfRemote = {}
+        this.haulerCarryParts = 0
         this.remoteSourceHarvesters = {}
 
         for (let index = roomMemory[RoomMemoryKeys.remotes].length - 1; index >= 0; index -= 1) {
@@ -270,10 +277,10 @@ export class CommuneManager {
     public run() {
         if (!this.room.memory[RoomMemoryKeys.communePlanned]) return
 
-        this.combatManager.run()
+        this.defenceManager.run()
         this.towerManager.run()
-        this.combatManager.manageThreat()
-        this.combatManager.manageDefenceRequests()
+        this.defenceManager.manageThreat()
+        this.defenceManager.manageDefenceRequests()
 
         this.terminalManager.run()
 
@@ -419,6 +426,30 @@ export class CommuneManager {
         return (this._minStoredEnergy = Math.floor(this._minStoredEnergy))
     }
 
+    _targetEnergy: number
+    /**
+     * The amount of energy the room wants to have
+     */
+    get targetEnergy() {
+        // Consider the controller level to an exponent and this room's attack threat
+
+        this._targetEnergy =
+            Math.pow(this.room.controller.level * 6000, 1.06) +
+            this.room.memory[RoomMemoryKeys.threatened] * 20
+
+        // If there is a next RCL, Take away some minimum based on how close we are to the next RCL
+
+        const RClCost = this.room.controller.progressTotal
+        if (RClCost) {
+            this._targetEnergy -= Math.pow(
+                (Math.min(this.room.controller.progress, RClCost) / RClCost) * 20,
+                3.35,
+            )
+        }
+
+        return this._targetEnergy
+    }
+
     get storedEnergyUpgradeThreshold() {
         return Math.floor(this.minStoredEnergy * 1.3)
     }
@@ -464,7 +495,7 @@ export class CommuneManager {
     _storingStructures: (StructureStorage | StructureTerminal)[]
 
     /**
-     * Storing structures - storage or teirmal - filtered to be defined and RCL active
+     * Storing structures - storage or teirmal - filtered to for defined and RCL active
      */
     get storingStructures() {
         if (this._storingStructures) return this._storingStructures
@@ -572,19 +603,24 @@ export class CommuneManager {
         return (this._maxUpgradeStrength = 100)
     }
 
+    _hasSufficientRoads: boolean
     /**
      * Informs wether we have sufficient roads compared to the roadQuota for our RCL
      */
-    hasSufficientRoads() {
-        const roomMemory = Memory.rooms[this.room.name]
-        const RCL = this.room.controller.level
-        // Try one RCL below, though propagate to the present RCL if there is no roadQuota for the previous RCL
-        const roadQuota =
-            roomMemory[RoomMemoryKeys.roadQuota][RCL - 1] ||
-            roomMemory[RoomMemoryKeys.roadQuota][RCL]
-        if (roadQuota === 0) return false
+    get hasSufficientRoads() {
+        if (this._hasSufficientRoads !== undefined) return this._hasSufficientRoads
 
-        return this.room.roomManager.structures.road.length >= roadQuota * 0.9
+        const roomMemory = Memory.rooms[this.room.name]
+        const RCLIndex = this.room.controller.level - 1
+        // Try one RCL below, though propagate to the present RCL if there is no roadQuota for the previous RCL
+        const minRoads =
+            roomMemory[RoomMemoryKeys.roadQuota][RCLIndex - 1] ||
+            roomMemory[RoomMemoryKeys.roadQuota][RCLIndex]
+        if (minRoads === 0) return false
+
+        const roads = this.room.roomManager.structures.road.length
+        // Make sure we have 90% of the intended roads amount
+        return (this._hasSufficientRoads = roads >= minRoads * 0.9)
     }
 
     _upgradeStructure: AnyStoreStructure | false
@@ -787,5 +823,23 @@ export class CommuneManager {
 
         this._controllerLinkID = structure.id
         return this._controllerLink
+    }
+
+    _fastFillerSpawnEnergyCapacity: number
+    get fastFillerSpawnEnergyCapacity() {
+        if (this._fastFillerSpawnEnergyCapacity && !this.room.roomManager.structureUpdate)
+            return this._fastFillerSpawnEnergyCapacity
+
+        let fastFillerSpawnEnergyCapacity = 0
+        const anchor = this.room.roomManager.anchor
+        if (!anchor) throw Error('no anchor for fastFillerSpawnEnergyCapacity ' + this.room)
+
+        for (const structure of this.room.spawningStructures) {
+            if (!structure.RCLActionable) continue
+
+            fastFillerSpawnEnergyCapacity += structure.store.getCapacity(RESOURCE_ENERGY)
+        }
+
+        return (this._fastFillerSpawnEnergyCapacity = fastFillerSpawnEnergyCapacity)
     }
 }

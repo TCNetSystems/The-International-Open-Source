@@ -22,8 +22,9 @@ import {
 } from 'international/utils'
 import { packCoord } from 'other/codec'
 import { CommuneManager } from './commune'
+import { internationalManager } from 'international/international'
 
-export class CombatManager {
+export class DefenceManager {
     communeManager: CommuneManager
 
     presentThreat: number
@@ -64,6 +65,15 @@ export class CombatManager {
         if (controller.safeModeCooldown) return false
         if (!controller.safeModeAvailable) return false
         if (controller.upgradeBlocked) return false
+        // We can't use safemode when the downgrade timer is too low
+        if (controller.ticksToDowngrade <= CONTROLLER_DOWNGRADE_SAFEMODE_THRESHOLD) return false
+        // If another room is safemoded, make sure that we are a higher level
+        if (
+            internationalManager.safemodedCommuneName &&
+            Game.rooms[internationalManager.safemodedCommuneName].controller.level >=
+                this.communeManager.room.controller.level
+        )
+            return false
 
         // Filter attackers that are not invaders. If there are none, stop
 
@@ -112,7 +122,20 @@ export class CombatManager {
     private advancedActivateSafeMode() {
         if (!this.shouldActivatesSafeMode()) return
 
-        this.communeManager.room.controller.activateSafeMode()
+        // If another room is safemoded and we determined it to be okay: unclaim it so we can safemode
+        if (internationalManager.safemodedCommuneName) {
+
+            const safemodedRoom = Game.rooms[internationalManager.safemodedCommuneName]
+            safemodedRoom.controller.unclaim()
+            // Add a return if we can't unclaim and safemode on the same tick
+        }
+
+        if (this.communeManager.room.controller.activateSafeMode() !== OK) return
+
+        // Safemode was probably activated
+
+        // Record that we safemoded so other communes know
+        internationalManager.safemodedCommuneName = this.communeManager.room.name
     }
 
     private manageRampartPublicity() {
@@ -232,6 +255,9 @@ export class CombatManager {
             if (onlyInvader && enemyCreep.owner.username !== 'Invader') onlyInvader = false
         }
 
+        // If we have towers and it's only invaders, we don't need a defence request
+        if (onlyInvader && room.roomManager.structures.tower.length) return
+
         // There is tower inferiority, make a defend request
 
         room.createDefendCombatRequest({
@@ -294,7 +320,6 @@ export class CombatManager {
         )
 
         if (this.presentThreat) {
-
             for (const [playerName, threat] of this.threatByPlayers) {
                 let player = Memory.players[playerName]
 

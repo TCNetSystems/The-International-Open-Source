@@ -16,10 +16,8 @@ import {
     constantRoomTypes,
     stamps,
     defaultStructureTypesByBuildPriority,
-    RESULT_FAIL,
-    RESULT_NO_ACTION,
+    Result,
     adjacentOffsets,
-    RESULT_SUCCESS,
     CreepMemoryKeys,
     RoomMemoryKeys,
     RoomTypes,
@@ -36,7 +34,6 @@ import {
     findClosestCommuneName,
     findCoordsInsideRect,
     findObjectWithID,
-    findDynamicScore,
     getRangeXY,
     isNearRoomEdge,
     newID,
@@ -60,6 +57,7 @@ import { posix } from 'path'
 import { BasePlans } from './construction/basePlans'
 import { customFindPath } from 'international/customPathFinder'
 import { playerManager } from 'international/players'
+import { roomUtils } from './roomUtils'
 
 /**
     @param pos1 pos of the object performing the action
@@ -217,6 +215,9 @@ Room.prototype.scoutEnemyUnreservedRemote = function () {
 
 Room.prototype.scoutMyRemote = function (scoutingRoom) {
     const roomMemory = Memory.rooms[this.name]
+
+    // The room is a remote but its commune no longer exists, change to neutral
+
     if (
         roomMemory[RoomMemoryKeys.type] === RoomTypes.remote &&
         !global.communes.has(roomMemory[RoomMemoryKeys.commune])
@@ -317,17 +318,19 @@ Room.prototype.scoutMyRemote = function (scoutingRoom) {
         // Generate new important positions
 
         let newCost = 0
+        const pathsThrough: Set<string> = new Set()
 
         const packedRemoteSources = this.roomManager.findRemoteSources(scoutingRoom)
         const packedRemoteSourceHarvestPositions =
             this.roomManager.findRemoteSourceHarvestPositions(scoutingRoom, packedRemoteSources)
-        const packedRemoteSourcePaths = this.roomManager.findRemoteSourcePaths(
+        const packedRemoteSourcePaths = this.roomManager.findRemoteSourceFastFillerPaths(
             scoutingRoom,
             packedRemoteSourceHarvestPositions,
+            pathsThrough,
         )
 
         for (const packedPath of packedRemoteSourcePaths) {
-            newCost += packedPath.length * packedPosLength
+            newCost += packedPath.length / packedPosLength
             if (!packedPath.length) {
                 return roomMemory[RoomMemoryKeys.type]
             }
@@ -338,19 +341,20 @@ Room.prototype.scoutMyRemote = function (scoutingRoom) {
         const packedRemoteControllerPath = this.roomManager.findRemoteControllerPath(
             scoutingRoom,
             packedRemoteControllerPositions,
+            pathsThrough,
         )
         if (!packedRemoteControllerPath.length)
             throw Error('No remote controller path for ' + this.name)
 
-        newCost += packedRemoteControllerPath.length * packedPosLength
+        newCost += packedRemoteControllerPath.length / packedPosLength
 
         // Compare new, potential efficiency, to old efficiency
 
         let currentCost = 0
-        for (const packedPath of roomMemory[RoomMemoryKeys.remoteSourcePaths]) {
-            currentCost += packedPath.length * packedPosLength
+        for (const packedPath of roomMemory[RoomMemoryKeys.remoteSourceFastFillerPaths]) {
+            currentCost += packedPath.length / packedPosLength
         }
-        currentCost += roomMemory[RoomMemoryKeys.remoteControllerPath].length * packedPosLength
+        currentCost += roomMemory[RoomMemoryKeys.remoteControllerPath].length / packedPosLength
 
         if (newCost >= currentCost) {
             return roomMemory[RoomMemoryKeys.type]
@@ -360,13 +364,28 @@ Room.prototype.scoutMyRemote = function (scoutingRoom) {
 
         roomMemory[RoomMemoryKeys.remoteSources] = packedRemoteSources
         roomMemory[RoomMemoryKeys.remoteSourceHarvestPositions] = packedRemoteSourceHarvestPositions
-        roomMemory[RoomMemoryKeys.remoteSourcePaths] = packedRemoteSourcePaths
+        roomMemory[RoomMemoryKeys.remoteSourceFastFillerPaths] = packedRemoteSourcePaths
         roomMemory[RoomMemoryKeys.remoteControllerPositions] = packedRemoteControllerPositions
         roomMemory[RoomMemoryKeys.remoteControllerPath] = packedRemoteControllerPath
+        // No reason to have the room or commune in the list - would result is uneeded searches
+        pathsThrough.delete(this.name)
+        pathsThrough.delete(scoutingRoom.name)
+        roomMemory[RoomMemoryKeys.pathsThrough] = Array.from(pathsThrough)
 
         roomMemory[RoomMemoryKeys.maxSourceIncome] = []
         roomMemory[RoomMemoryKeys.remoteSourceHarvesters] = []
         roomMemory[RoomMemoryKeys.remoteHaulers] = []
+        roomMemory[RoomMemoryKeys.remoteSourceCredit] = []
+        roomMemory[RoomMemoryKeys.hasContainer] = []
+
+        for (const i in packedRemoteSources) {
+            roomMemory[RoomMemoryKeys.remoteSourceCredit][i] = 0
+            roomMemory[RoomMemoryKeys.hasContainer][i] = false
+        }
+        roomMemory[RoomMemoryKeys.remoteSourceCreditChange] = []
+        roomMemory[RoomMemoryKeys.remoteSourceCreditReservation] = []
+        roomMemory[RoomMemoryKeys.remoteCoreAttacker] = 0
+        roomMemory[RoomMemoryKeys.abandonRemote] = 0
 
         // Add the room's name to the scoutingRoom's remotes list
 
@@ -380,15 +399,17 @@ Room.prototype.scoutMyRemote = function (scoutingRoom) {
     // The room is not a remote
 
     // Generate new important positions
+    const pathsThrough: Set<string> = new Set()
 
     const packedRemoteSources = this.roomManager.findRemoteSources(scoutingRoom)
     const packedRemoteSourceHarvestPositions = this.roomManager.findRemoteSourceHarvestPositions(
         scoutingRoom,
         packedRemoteSources,
     )
-    const packedRemoteSourcePaths = this.roomManager.findRemoteSourcePaths(
+    const packedRemoteSourcePaths = this.roomManager.findRemoteSourceFastFillerPaths(
         scoutingRoom,
         packedRemoteSourceHarvestPositions,
+        pathsThrough,
     )
     for (const packedPath of packedRemoteSourcePaths) {
         if (!packedPath.length) {
@@ -401,6 +422,7 @@ Room.prototype.scoutMyRemote = function (scoutingRoom) {
     const packedRemoteControllerPath = this.roomManager.findRemoteControllerPath(
         scoutingRoom,
         packedRemoteControllerPositions,
+        pathsThrough,
     )
     if (!packedRemoteControllerPath.length)
         throw Error('No remote controller path for ' + this.name)
@@ -424,13 +446,28 @@ Room.prototype.scoutMyRemote = function (scoutingRoom) {
 
     roomMemory[RoomMemoryKeys.remoteSources] = packedRemoteSources
     roomMemory[RoomMemoryKeys.remoteSourceHarvestPositions] = packedRemoteSourceHarvestPositions
-    roomMemory[RoomMemoryKeys.remoteSourcePaths] = packedRemoteSourcePaths
+    roomMemory[RoomMemoryKeys.remoteSourceFastFillerPaths] = packedRemoteSourcePaths
     roomMemory[RoomMemoryKeys.remoteControllerPositions] = packedRemoteControllerPositions
     roomMemory[RoomMemoryKeys.remoteControllerPath] = packedRemoteControllerPath
+    // No reason to have the room or commune in the list - would result is uneeded searches
+    pathsThrough.delete(this.name)
+    pathsThrough.delete(scoutingRoom.name)
+    roomMemory[RoomMemoryKeys.pathsThrough] = Array.from(pathsThrough)
 
     roomMemory[RoomMemoryKeys.maxSourceIncome] = []
     roomMemory[RoomMemoryKeys.remoteSourceHarvesters] = []
     roomMemory[RoomMemoryKeys.remoteHaulers] = []
+    roomMemory[RoomMemoryKeys.remoteSourceCredit] = []
+    roomMemory[RoomMemoryKeys.hasContainer] = []
+
+    for (const i in packedRemoteSources) {
+        roomMemory[RoomMemoryKeys.remoteSourceCredit][i] = 0
+        roomMemory[RoomMemoryKeys.hasContainer][i] = false
+    }
+    roomMemory[RoomMemoryKeys.remoteSourceCreditChange] = []
+    roomMemory[RoomMemoryKeys.remoteSourceCreditReservation] = []
+    roomMemory[RoomMemoryKeys.remoteCoreAttacker] = 0
+    roomMemory[RoomMemoryKeys.abandonRemote] = 0
 
     // Add the room's name to the scoutingRoom's remotes list
 
@@ -1734,33 +1771,6 @@ Room.prototype.findClosestPosOfValueAsym = function (opts) {
     return false
 }
 
-Room.prototype.pathVisual = function (path, color, visualize = Memory.roomVisuals) {
-    if (!visualize) return
-
-    if (!path.length) return
-
-    // Filter only positions in the path that are in the path's starting room
-
-    const currentRoomName = path[0].roomName
-
-    for (let index = 0; index < path.length; index += 1) {
-        const pos = path[index]
-
-        if (pos.roomName === currentRoomName) continue
-
-        path.splice(index, path.length - 1)
-        break
-    }
-
-    // Generate the visual
-
-    this.visual.poly(path, {
-        stroke: customColors[color],
-        strokeWidth: 0.15,
-        opacity: 0.3,
-    })
-}
-
 Room.prototype.errorVisual = function (coord, visualize = Memory.roomVisuals) {
     if (!visualize) return
 
@@ -2063,19 +2073,19 @@ Room.prototype.createWorkRequest = function () {
     if (this.find(FIND_SOURCES).length < 2) return false
     if (Memory.workRequests[this.name]) return false
 
-    findDynamicScore(this.name)
+    roomUtils.findDynamicScore(this.name)
 
     const communePlanned = Memory.rooms[this.name][RoomMemoryKeys.communePlanned]
     if (communePlanned === false) return false
 
     if (communePlanned !== true) {
         const result = this.roomManager.communePlanner.preTickRun()
-        if (result === RESULT_FAIL) {
+        if (result === Result.fail) {
             this.memory[RoomMemoryKeys.communePlanned] = false
             return false
         }
 
-        if (result !== RESULT_SUCCESS) {
+        if (result !== Result.success) {
             return false
         }
     }
@@ -2194,7 +2204,7 @@ Room.prototype.highestWeightedStoringStructures = function (resourceType) {
 Room.prototype.createRoomLogisticsRequest = function (args) {
     // Don't make requests when there is nobody to respond
 
-    if (!this.myCreepsAmount) return RESULT_NO_ACTION
+    if (!this.myCreepsAmount) return Result.noAction
 
     if (!args.resourceType) args.resourceType = RESOURCE_ENERGY
     // We can only handle energy until we have a storage or terminal
@@ -2202,7 +2212,7 @@ Room.prototype.createRoomLogisticsRequest = function (args) {
         args.resourceType !== RESOURCE_ENERGY &&
         (!this.storage || this.controller.level < 4 || !this.terminal || this.controller.level < 6)
     )
-        return RESULT_FAIL
+        return Result.fail
 
     let amount: number
 
@@ -2211,13 +2221,13 @@ Room.prototype.createRoomLogisticsRequest = function (args) {
     if (args.target instanceof Resource) {
         amount = (args.target as Resource).reserveAmount
 
-        if (amount < 1) return RESULT_FAIL
+        if (amount < 1) return Result.fail
     } else if (args.type === 'transfer') {
         if (
             args.target.reserveStore[args.resourceType] >=
             args.target.store.getCapacity(args.resourceType)
         )
-            return RESULT_FAIL
+            return Result.fail
 
         amount = args.target.freeReserveStoreOf(args.resourceType)
         /* this.visual.text(args.target.reserveStore[args.resourceType].toString(), args.target.pos) */
@@ -2229,7 +2239,7 @@ Room.prototype.createRoomLogisticsRequest = function (args) {
 
         // We don't have enough resources to make a request
 
-        if (amount < 1) return RESULT_FAIL
+        if (amount < 1) return Result.fail
 
         if (args.maxAmount) amount = Math.min(amount, Math.round(args.maxAmount))
     }

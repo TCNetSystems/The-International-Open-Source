@@ -2,8 +2,11 @@ import { PlayerMemoryKeys, customColors, towerPowers } from 'international/const
 import { updateStat } from 'international/statsManager'
 import {
     customLog,
+    findHighestScore,
     findObjectWithID,
     findWeightedRangeFromExit,
+    findWithHighestScore,
+    findWithLowestScore,
     getRange,
     isXYInBorder,
     randomTick,
@@ -13,15 +16,17 @@ import { packCoord } from 'other/codec'
 import { CommuneManager } from './commune'
 import { playerManager } from 'international/players'
 
+const minTowerRampartRepairTreshold = 400
+
 export class TowerManager {
     communeManager: CommuneManager
     actionableTowerIDs: Id<StructureTower>[]
 
-    public constructor(communeManager: CommuneManager) {
+    constructor(communeManager: CommuneManager) {
         this.communeManager = communeManager
     }
 
-    public run() {
+    run() {
         const { room } = this.communeManager
         // If CPU logging is enabled, get the CPU used at the start
 
@@ -44,6 +49,11 @@ export class TowerManager {
             this.actionableTowerIDs.push(tower.id)
         }
 
+        if (randomTick()) {
+
+            delete this._towerRampartRepairThreshold
+        }
+
         this.createRoomLogisticsRequests()
 
         if (!this.attackEnemyCreeps()) return
@@ -64,7 +74,12 @@ export class TowerManager {
         }
     }
 
-    findAttackTarget() {
+    private trackEnemySquads() {
+
+
+    }
+
+    private findAttackTarget() {
         const { room } = this.communeManager
 
         if (room.towerAttackTarget) return room.towerAttackTarget
@@ -117,7 +132,7 @@ export class TowerManager {
         return room.towerAttackTarget
     }
 
-    attackEnemyCreeps() {
+    private attackEnemyCreeps() {
         if (this.communeManager.room.flags.disableTowerAttacks) {
             this.communeManager.room.towerInferiority =
                 this.communeManager.room.enemyAttackers.length > 0
@@ -199,7 +214,7 @@ export class TowerManager {
         return healTargets.find(creep => !creep.isOnExit)
     }
 
-    healCreeps() {
+    private healCreeps() {
         if (!this.actionableTowerIDs.length) return false
 
         const healTarget = this.findHealTarget()
@@ -216,42 +231,54 @@ export class TowerManager {
         return true
     }
 
-    findRampartRepairTargets() {
-        return this.communeManager.rampartRepairTargets.filter(function (rampart) {
-            return rampart.hits <= RAMPART_DECAY_AMOUNT
+    private findRampartRepairTarget() {
+
+        const { room } = this.communeManager
+        const ramparts = room.enemyAttackers.length
+        ? room.communeManager.defensiveRamparts
+        : room.communeManager.rampartRepairTargets
+
+        const [score, rampart] = findWithLowestScore(ramparts, (rampart) => {
+
+            let score = rampart.hits
+            // Account for decay amount: percent of time to decay times decay amount
+            score += Math.floor(RAMPART_DECAY_AMOUNT * (RAMPART_DECAY_TIME - rampart.ticksToDecay / RAMPART_DECAY_TIME))
+
+            return score
         })
+
+        const rampartRepairThreshold = this.rampartRepairTreshold
+
+        // Make sure the rampart is below the treshold
+        if (score > rampartRepairThreshold) return false
+        return rampart
     }
 
-    repairRamparts() {
+    private repairRamparts() {
         if (!this.actionableTowerIDs.length) return false
 
-        const repairTargets = this.findRampartRepairTargets()
-        if (!repairTargets.length) return true
+        const repairTarget = this.findRampartRepairTarget()
+        if (!repairTarget) return false
 
         for (let i = this.actionableTowerIDs.length - 1; i >= 0; i--) {
             const tower = findObjectWithID(this.actionableTowerIDs[i])
-
-            const target = repairTargets[repairTargets.length - 1]
-            if (tower.repair(target) !== OK) continue
+            if (tower.repair(repairTarget) !== OK) continue
 
             updateStat(this.communeManager.room.name, 'eorwr', TOWER_ENERGY_COST)
-
-            repairTargets.pop()
-
             this.actionableTowerIDs.splice(i, 1)
         }
 
         return true
     }
 
-    findGeneralRepairTargets() {
+    private findGeneralRepairTargets() {
         let structures: Structure[] = this.communeManager.room.roomManager.structures.spawn
         structures = structures.concat(this.communeManager.room.roomManager.structures.tower)
 
         return structures
     }
 
-    repairGeneral() {
+    private repairGeneral() {
         if (!this.actionableTowerIDs.length) return false
         if (!randomTick(100)) return true
 
@@ -315,6 +342,20 @@ export class TowerManager {
                 })
             }
         }
+    }
+
+    _towerRampartRepairThreshold: number
+    get rampartRepairTreshold() {
+        if (this._towerRampartRepairThreshold) return this._towerRampartRepairThreshold
+
+        let rampartRepairTreshold = minTowerRampartRepairTreshold
+
+        const enemySquadData = this.communeManager.room.roomManager.enemySquadData
+        rampartRepairTreshold += enemySquadData.highestDismantle
+        // Melee damage includes ranged
+        rampartRepairTreshold += enemySquadData.highestMeleeDamage
+
+        return this._towerRampartRepairThreshold = rampartRepairTreshold
     }
 }
 

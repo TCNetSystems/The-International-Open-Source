@@ -237,15 +237,16 @@ export class RoomVisualsManager {
     }
 
     private internationalGeneralDataVisuals(y: number) {
-        const headers: any[] = [
-            'funnelOrder',
-            'highestThreat',
-            'minCredits',
-            'last config']
+        const headers: any[] = ['funnelOrder', 'highestThreat', 'minCredits', 'last config']
 
         const data: any[][] = [[]]
 
-        data[0].push(internationalManager.funnelOrder.slice(0, 3), playerManager.highestThreat, internationalManager.minCredits, Game.time - Memory.lastConfig)
+        data[0].push(
+            internationalManager.funnelOrder.slice(0, 3),
+            playerManager.highestThreat,
+            internationalManager.minCredits,
+            Game.time - Memory.lastConfig,
+        )
 
         const height = 3 + data.length
 
@@ -765,12 +766,15 @@ export class RoomVisualsManager {
         const headers: any[] = [
             'room',
             'sourceIndex',
-            'efficacy',
-            'harvester',
+            '📈',
+            '⚡⛏️',
             'hauler',
+            '⚡',
+            'Δ⚡',
+            '⚡Reserved',
             'reserver',
             'coreAttacker',
-            'abandoned',
+            '❌',
         ]
         const data: any[][] = []
 
@@ -779,22 +783,41 @@ export class RoomVisualsManager {
             const remoteName = splitRemoteInfo[0]
             const sourceIndex = parseInt(splitRemoteInfo[1]) as 0 | 1
             const remoteMemory = Memory.rooms[remoteName]
-
+            console.log(remoteName, sourceIndex)
             const row: any[] = []
 
             row.push(remoteName)
             row.push(sourceIndex)
-            if (remoteMemory[RoomMemoryKeys.remoteSourcePaths][sourceIndex])
+            if (remoteMemory[RoomMemoryKeys.remoteSourceFastFillerPaths][sourceIndex])
                 row.push(
-                    remoteMemory[RoomMemoryKeys.remoteSourcePaths][sourceIndex].length /
+                    remoteMemory[RoomMemoryKeys.remoteSourceFastFillerPaths][sourceIndex].length /
                         packedPosLength,
                 )
             else row.push('undefined')
             row.push(remoteMemory[RoomMemoryKeys.remoteSourceHarvesters][sourceIndex])
             row.push(remoteMemory[RoomMemoryKeys.remoteHaulers][sourceIndex])
+            row.push(remoteMemory[RoomMemoryKeys.remoteSourceCredit][sourceIndex].toFixed(2))
+            row.push(remoteMemory[RoomMemoryKeys.remoteSourceCreditChange][sourceIndex].toFixed(2))
+            row.push(
+                remoteMemory[RoomMemoryKeys.remoteSourceCreditReservation][sourceIndex] +
+                    '/' +
+                    Math.round(
+                        (remoteMemory[RoomMemoryKeys.remoteSourceFastFillerPaths][sourceIndex]
+                            .length /
+                            packedPosLength) *
+                            remoteMemory[RoomMemoryKeys.remoteSourceCreditChange][sourceIndex],
+                    ) *
+                        2,
+            )
             row.push(remoteMemory[RoomMemoryKeys.remoteReserver])
-            row.push(remoteMemory[RoomMemoryKeys.remoteCoreAttacker] || 0)
-            row.push(remoteMemory[RoomMemoryKeys.abandon] || 0)
+            row.push(
+                remoteMemory[RoomMemoryKeys.remoteCoreAttacker] ||
+                    remoteMemory[RoomMemoryKeys.remoteCoreAttacker] + '',
+            )
+            row.push(
+                remoteMemory[RoomMemoryKeys.abandonRemote] ||
+                    remoteMemory[RoomMemoryKeys.abandonRemote] + '',
+            )
 
             data.push(row)
         }

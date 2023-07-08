@@ -16,6 +16,7 @@ import {
     RoomMemoryKeys,
     RoomTypes,
     SleepFor,
+    Result,
 } from 'international/constants'
 import { Operator } from 'room/creeps/powerCreeps/operator'
 import { MeleeDefender } from 'room/creeps/roleManagers/commune/defenders/meleeDefender'
@@ -187,17 +188,21 @@ declare global {
     interface RampartPlanCoord {
         minRCL: number
         /**
-         * Flase or truthy number
+         * A boolean integer
          */
         coversStructure: number
         /**
-         * Flase or truthy number
+         * A boolean integer
          */
         buildForNuke: number
         /**
-         * Flase or truthy number
+         * A boolean integer
          */
         buildForThreat: number
+        /**
+         * A boolean integer
+         */
+        needsStoringStructure: number
     }
 
     type QuadTransformTypes =
@@ -225,10 +230,15 @@ declare global {
         plainCost?: number
         swampCost?: number
         maxRooms?: number
+        /**
+         * Default is false
+         */
         flee?: boolean
         creep?: Creep
-
-        avoidAbandonedRemotes?: boolean
+        /**
+         * Default is true
+         */
+        avoidDanger?: boolean
 
         weightStructures?: Partial<{ [key in StructureConstant]: number }>
 
@@ -880,6 +890,19 @@ declare global {
         defaultCostMatrix: number[]
     }
 
+    interface EnemySquadData {
+        /**
+         * enemy attack + rangedAttack damage
+         */
+        highestMeleeDamage: number
+        highestRangedDamage: number
+        /**
+         * Accounts for defence
+         */
+        highestHeal: number
+        highestDismantle: number
+    }
+
     interface TotalEnemyCombatStrength {
         melee: number
         ranged: number
@@ -1100,11 +1123,6 @@ declare global {
          * Flood fills a room until it finds the closest pos with a value greater than or equal to the one specified, that does not infringe on disabled tiles
          */
         findClosestPosOfValueAsym(opts: FindClosestPosOfValueOptsAsym): RoomPosition | false
-
-        /**
-         *
-         */
-        pathVisual(path: RoomPosition[], color: keyof Colors, visualize?: boolean): void
 
         errorVisual(coord: Coord, visualize?: boolean): void
 
@@ -1547,7 +1565,7 @@ declare global {
         avoidEnemyThreatCoords(): boolean
 
         /**
-         * Decides if the creep needs to get more resources or not
+         * Decides if the creep needs to get more resources or not. DO NOT USE FOR CREEPS THAT PERFORM MULTIPLE TRANSACTIONS PER TICK
          */
         needsResources(): boolean
 
@@ -1696,6 +1714,11 @@ declare global {
          */
         spawnID: Id<StructureSpawn>
 
+        /**
+         * The change to a value the creep opperated this tick
+         */
+        dataChange: number
+
         // Creep Functions
 
         activeRenew(): void
@@ -1730,10 +1753,10 @@ declare global {
         ): CreepRoomLogisticsRequest | 0
         findRoomLogisticRequestAmount(request: RoomLogisticsRequest): number
 
-        runRoomLogisticsRequestAdvanced(args?: findNewRoomLogisticsRequestArgs): number
+        runRoomLogisticsRequestAdvanced(args?: findNewRoomLogisticsRequestArgs): Result
         runRoomLogisticsRequestsAdvanced(args?: findNewRoomLogisticsRequestArgs): boolean
 
-        runRoomLogisticsRequest(): number
+        runRoomLogisticsRequest(): Result
         runRoomLogisticsRequests(): boolean
 
         findCreepRoomLogisticsRequestAmount(
@@ -1920,14 +1943,19 @@ declare global {
         _nextStore: Partial<CustomStore>
 
         /**
-         * The estimated store values next tick
+         * The estimated store values next tick. Values can be negative
          */
         readonly nextStore: Partial<CustomStore>
 
         _usedNextStore: number
-
+        /**
+         * Can be negative
+         */
         readonly usedNextStore: number
 
+        /**
+         * Can be negative
+         */
         readonly freeNextStore: number
 
         _reserveStore: Partial<CustomStore>
@@ -1970,6 +1998,7 @@ declare global {
     interface RoomMemory {
         [RoomMemoryKeys.type]: RoomTypes
         [RoomMemoryKeys.lastScout]: number
+        [RoomMemoryKeys.danger]?: number
 
         // Types specific
 
@@ -2010,7 +2039,7 @@ declare global {
         [RoomMemoryKeys.minHaulerCost]: number
         [RoomMemoryKeys.minHaulerCostUpdate]: number
         [RoomMemoryKeys.greatestRCL]: number
-        [RoomMemoryKeys.abandoned]: boolean
+        [RoomMemoryKeys.abandonCommune]: boolean
         [RoomMemoryKeys.marketData]: {
             [RESOURCE_ENERGY]?: number
             sellAvg?: { [key in ResourceConstant]?: number }
@@ -2039,7 +2068,8 @@ declare global {
         [RoomMemoryKeys.remoteCoreAttacker]: number
         [RoomMemoryKeys.remoteBuilder]: number
         [RoomMemoryKeys.remoteDismantler]: number
-        [RoomMemoryKeys.abandon]: number
+        [RoomMemoryKeys.abandonRemote]: number
+        [RoomMemoryKeys.recursedAbandonment]: boolean
         [RoomMemoryKeys.use]: boolean
         [RoomMemoryKeys.enemyReserved]: boolean
         [RoomMemoryKeys.invaderCore]: number
@@ -2050,12 +2080,17 @@ declare global {
         [RoomMemoryKeys.remoteControllerPositions]: string
         [RoomMemoryKeys.remoteSources]: Id<Source>[]
         [RoomMemoryKeys.remoteSourceHarvestPositions]: string[]
-        [RoomMemoryKeys.remoteSourcePaths]: string[]
+        [RoomMemoryKeys.remoteSourceFastFillerPaths]: string[]
+        [RoomMemoryKeys.remoteSourceHubPaths]: string[]
         [RoomMemoryKeys.clearedEnemyStructures]: boolean
         [RoomMemoryKeys.lastStructureCheck]: number
         [RoomMemoryKeys.roadsQuota]: number[]
         [RoomMemoryKeys.roads]: number[]
         [RoomMemoryKeys.remoteSourceCredit]: number[]
+        [RoomMemoryKeys.remoteSourceCreditChange]: number[]
+        [RoomMemoryKeys.remoteSourceCreditReservation]: number[]
+        [RoomMemoryKeys.hasContainer]: boolean[]
+        [RoomMemoryKeys.pathsThrough]: string[]
 
         // Ally
 

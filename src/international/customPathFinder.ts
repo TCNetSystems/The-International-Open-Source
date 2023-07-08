@@ -1,8 +1,7 @@
 import { BasePlans } from 'room/construction/basePlans'
 import {
     CreepMemoryKeys,
-    RESULT_FAIL,
-    RESULT_SUCCESS,
+    Result,
     RoomMemoryKeys,
     RoomTypes,
     customColors,
@@ -11,13 +10,13 @@ import {
     impassibleStructureTypes,
     roomDimensions,
 } from './constants'
-import { packCoord, unpackCoord, unpackPosList } from 'other/codec'
-import { customLog, unpackNumAsCoord } from './utils'
+import { packCoord, unpackCoord, unpackPosAt, unpackPosList } from 'other/codec'
+import { customLog, unpackNumAsCoord, visualizePath } from './utils'
 
 export function customFindPath(args: CustomPathFinderArgs) {
     const allowedRoomNames = new Set([args.origin.roomName])
 
-    if (generateRoute(args, allowedRoomNames) === RESULT_FAIL) return []
+    if (generateRoute(args, allowedRoomNames) === Result.fail) return []
     weightStructurePlans(args, allowedRoomNames)
     return generatePath(args, allowedRoomNames)
 }
@@ -42,19 +41,19 @@ function generateRoute(args: CustomPathFinderArgs, allowedRoomNames: Set<string>
                 if (roomName === goal.pos.roomName) return 1
                 return Infinity
             }
+
+            // Avoid dangerous rooms if we are told to and the danger is persistent
             if (
-                args.avoidAbandonedRemotes &&
-                roomMemory[RoomMemoryKeys.type] === RoomTypes.remote &&
-                roomMemory[RoomMemoryKeys.abandon]
+                args.avoidDanger &&
+                roomMemory[RoomMemoryKeys.danger] &&
+                roomMemory[RoomMemoryKeys.danger] >= Game.time
             )
                 return Infinity
 
             // If the goal is in the room
-
             if (roomName === goal.pos.roomName) return 1
 
             // If the type is in typeWeights, inform the weight for the type
-
             if (args.typeWeights && args.typeWeights[roomMemory[RoomMemoryKeys.type] as 0])
                 return args.typeWeights[roomMemory[RoomMemoryKeys.type] as 0]
 
@@ -71,7 +70,7 @@ function generateRoute(args: CustomPathFinderArgs, allowedRoomNames: Set<string>
 
         // If a route can't be found
 
-        if (route === ERR_NO_PATH) return RESULT_FAIL
+        if (route === ERR_NO_PATH) return Result.fail
 
         for (const roomRoute of route) {
             allowedRoomNames.add(roomRoute.room)
@@ -88,7 +87,7 @@ function generateRoute(args: CustomPathFinderArgs, allowedRoomNames: Set<string>
         }
     }
 
-    return RESULT_SUCCESS
+    return Result.success
 }
 
 function weightStructurePlans(args: CustomPathFinderArgs, allowedRoomNames: Set<string>) {
@@ -170,13 +169,32 @@ function weightStructurePlans(args: CustomPathFinderArgs, allowedRoomNames: Set<
                 }
             }
         } else if (roomMemory[RoomMemoryKeys.type] === RoomTypes.remote) {
-            for (const packedPath of roomMemory[RoomMemoryKeys.remoteSourcePaths]) {
+            for (const packedPath of roomMemory[RoomMemoryKeys.remoteSourceFastFillerPaths]) {
                 const path = unpackPosList(packedPath)
 
                 for (const pos of path) {
                     if (!args.weightCoords[pos.roomName]) args.weightCoords[pos.roomName] = {}
                     args.weightCoords[pos.roomName][packCoord(pos)] = 1
                 }
+            }
+
+            // Prefer to avoid the best source harvest pos
+            for (const packedPositions of roomMemory[RoomMemoryKeys.remoteSourceHarvestPositions]) {
+                const positions = unpackPosList(packedPositions)
+                const packedCoord = packCoord(positions[positions.length - 1])
+
+                const currentWeight = args.weightCoords[roomName][packedCoord] || 0
+                args.weightCoords[roomName][packedCoord] = Math.max(20, currentWeight)
+            }
+
+            // Prefer to avoid all potential reservation positions
+
+            const positions = unpackPosList(roomMemory[RoomMemoryKeys.remoteControllerPositions])
+
+            for (const pos of positions) {
+                const packedCoord = packCoord(pos)
+                const currentWeight = args.weightCoords[roomName][packedCoord] || 0
+                args.weightCoords[roomName][packedCoord] = Math.max(20, currentWeight)
             }
         }
     }
@@ -187,7 +205,9 @@ function generatePath(args: CustomPathFinderArgs, allowedRoomNames: Set<string>)
     args.swampCost = args.swampCost || defaultSwampCost
 
     const originRoom: undefined | Room = Game.rooms[args.origin.roomName]
-    const maxRooms = args.maxRooms ? Math.min(allowedRoomNames.size, args.maxRooms) : allowedRoomNames.size
+    const maxRooms = args.maxRooms
+        ? Math.min(allowedRoomNames.size, args.maxRooms)
+        : allowedRoomNames.size
     const pathFinderResult = PathFinder.search(args.origin, args.goals, {
         plainCost: args.plainCost,
         swampCost: args.swampCost,
@@ -280,7 +300,8 @@ function generatePath(args: CustomPathFinderArgs, allowedRoomNames: Set<string>)
                 let roadCost = 1
                 if (!args.creep.memory[CreepMemoryKeys.preferRoads]) roadCost = args.plainCost
 
-                for (const road of room.roomManager.structures.road) cm.set(road.pos.x, road.pos.y, roadCost)
+                for (const road of room.roomManager.structures.road)
+                    cm.set(road.pos.x, road.pos.y, roadCost)
             }
 
             // If avoidStationaryPositions is requested
@@ -327,7 +348,8 @@ function generatePath(args: CustomPathFinderArgs, allowedRoomNames: Set<string>)
                     cm.set(structure.pos.x, structure.pos.y, args.weightStructures[structureType])
             }
 
-            for (const portal of room.roomManager.structures.portal) cm.set(portal.pos.x, portal.pos.y, 255)
+            for (const portal of room.roomManager.structures.portal)
+                cm.set(portal.pos.x, portal.pos.y, 255)
 
             // Loop trough each construction site belonging to an ally
 
@@ -353,7 +375,8 @@ function generatePath(args: CustomPathFinderArgs, allowedRoomNames: Set<string>)
                 for (const creep of room.enemyCreeps) cm.set(creep.pos.x, creep.pos.y, 255)
                 for (const creep of room.allyCreeps) cm.set(creep.pos.x, creep.pos.y, 255)
 
-                for (const creep of room.find(FIND_HOSTILE_POWER_CREEPS)) cm.set(creep.pos.x, creep.pos.y, 255)
+                for (const creep of room.find(FIND_HOSTILE_POWER_CREEPS))
+                    cm.set(creep.pos.x, creep.pos.y, 255)
             }
 
             // If avoiding structures that can't be walked on is enabled
@@ -376,7 +399,8 @@ function generatePath(args: CustomPathFinderArgs, allowedRoomNames: Set<string>)
                     // If the rampart is public and owned by an ally
                     // We don't want to try to walk through enemy public ramparts as it could trick our pathing
 
-                    if (rampart.isPublic && Memory.allyPlayers.includes(rampart.owner.username)) continue
+                    if (rampart.isPublic && Memory.allyPlayers.includes(rampart.owner.username))
+                        continue
 
                     // Otherwise set the rampart's pos as impassible
 
@@ -439,7 +463,7 @@ function generatePath(args: CustomPathFinderArgs, allowedRoomNames: Set<string>)
             },
         )
 
-        originRoom.pathVisual(pathFinderResult.path, 'red')
+        visualizePath(pathFinderResult.path, customColors.red)
         originRoom.errorVisual(args.origin)
 
         let lastPos = args.origin

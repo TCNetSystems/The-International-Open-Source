@@ -2,7 +2,7 @@ import {
     CreepMemoryKeys,
     customColors,
     remoteTypeWeights,
-    RESULT_FAIL,
+    Result,
     RoomMemoryKeys,
     RoomTypes,
 } from 'international/constants'
@@ -61,7 +61,7 @@ export class RemoteCoreAttacker extends Creep {
         if (
             remoteMemory[RoomMemoryKeys.type] !== RoomTypes.remote ||
             remoteMemory[RoomMemoryKeys.commune] !== this.commune.name ||
-            remoteMemory[RoomMemoryKeys.abandon]
+            remoteMemory[RoomMemoryKeys.abandonRemote]
         ) {
             this.removeRemote()
             return false
@@ -127,6 +127,7 @@ export class RemoteCoreAttacker extends Creep {
         // Find the closest core
 
         const closestCore = room.roomManager.structures.invaderCore[0]
+        this.actionCoord = closestCore.pos
 
         // If the creep at the core
 
@@ -191,8 +192,8 @@ export class RemoteCoreAttacker extends Creep {
                             },
                         ],
                         typeWeights: remoteTypeWeights,
-                        avoidAbandonedRemotes: true,
-                    }) === RESULT_FAIL
+                        avoidDanger: true,
+                    }) === Result.fail
                 ) {
                     creepMemory[CreepMemoryKeys.sleepFor] = 'any'
                     creepMemory[CreepMemoryKeys.sleepTime] = Game.time + randomIntRange(10, 50)
@@ -222,11 +223,11 @@ export class RemoteCoreAttacker extends Creep {
                         },
                     ],
                     typeWeights: remoteTypeWeights,
-                    avoidAbandonedRemotes: true,
-                }) === RESULT_FAIL
+                    avoidDanger: true,
+                }) === Result.fail
             ) {
                 Memory.rooms[Memory.creeps[creep.name][CreepMemoryKeys.remote]][
-                    RoomMemoryKeys.abandon
+                    RoomMemoryKeys.abandonRemote
                 ] = 1500
                 creep.removeRemote()
             }

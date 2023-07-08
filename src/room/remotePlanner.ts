@@ -11,12 +11,9 @@ import {
     stamps,
     TO_EXIT,
     UNWALKABLE,
-    RESULT_SUCCESS,
-    RESULT_FAIL,
+    Result,
     cardinalOffsets,
     adjacentOffsets,
-    RESULT_NO_ACTION,
-    RESULT_ACTION,
     defaultMinCutDepth,
     minOnboardingRamparts,
     defaultSwampCost,
@@ -276,11 +273,11 @@ export class RemotePlanner {
     preTickRun() {
         this.room = this.roomManager.room
 
-        if (this.room.memory[RoomMemoryKeys.communePlanned] !== undefined) return RESULT_NO_ACTION
+        if (this.room.memory[RoomMemoryKeys.communePlanned] !== undefined) return Result.noAction
 
         // Stop if there isn't sufficient CPU
 
-        if (Game.cpu.bucket < CPUMaxPerTick) return RESULT_NO_ACTION
+        if (Game.cpu.bucket < CPUMaxPerTick) return Result.noAction
 
         if (this.recording) this.record()
 
@@ -292,7 +289,7 @@ export class RemotePlanner {
         ) {
             /* this.visualizeBestPlan() */
             this.choosePlan()
-            return RESULT_SUCCESS
+            return Result.success
         }
 
         // Initial configuration
@@ -341,15 +338,15 @@ export class RemotePlanner {
         const unpacked = BasePlans.unpack(packedPlans)
         customLog('UNPACKED', JSON.stringify(unpacked.map))
         delete this.baseCoords
-        return RESULT_NO_ACTION
+        return Result.noAction
  */
         this.avoidSources()
         this.avoidMineral()
-        if (this.fastFiller() === RESULT_FAIL) return RESULT_FAIL
+        if (this.fastFiller() === Result.fail) return Result.fail
         this.postFastFillerConfig()
         this.generateGrid()
         /* this.pruneFastFillerRoads() */
-        if (this.findCenterUpgradePos() === RESULT_FAIL) return RESULT_FAIL
+        if (this.findCenterUpgradePos() === Result.fail) return Result.fail
         this.findSourceHarvestPositions()
         this.hub()
         this.labs()
@@ -375,11 +372,11 @@ export class RemotePlanner {
         this.generalShield()
         this.visualizeCurrentPlan()
         /* this.visualizeCurrentPlan()
-        return RESULT_SUCCESS */
+        return Result.success */
         this.findScore()
         this.record()
 
-        return RESULT_ACTION
+        return Result.action
     }
     /**
      *
@@ -460,33 +457,6 @@ export class RemotePlanner {
 
         planCoord.minRCL = Math.min(planCoord.minRCL, minRCL)
         */
-    }
-    private setRampartPlansXY(
-        x: number,
-        y: number,
-        minRCL: number,
-        coversStructure: boolean,
-        buildForNuke: boolean,
-        buildForThreat: boolean,
-    ) {
-        const packedCoord = packXYAsCoord(x, y)
-
-        const coordData = this.rampartPlans.map[packedCoord]
-        if (coordData) {
-            this.rampartPlans.map[packedCoord] = {
-                minRCL: Math.min(coordData.minRCL, minRCL),
-                coversStructure: +coordData.coversStructure /* || +coversStructure */,
-                buildForNuke: +coordData.buildForNuke /* || +buildForNuke */,
-                buildForThreat: +coordData.buildForThreat /* || +buildForThreat */,
-            }
-        }
-
-        this.rampartPlans.map[packedCoord] = {
-            minRCL,
-            coversStructure: +coversStructure,
-            buildForNuke: +buildForNuke,
-            buildForThreat: +buildForThreat,
-        }
     }
     private recordExits() {
         for (const packedCoord of this.room.exitCoords) {
@@ -834,7 +804,7 @@ export class RemotePlanner {
     /**
      *
      * @param coord
-     * @returns RESULT_ACTION if the road should be removed
+     * @returns Result.action if the road should be removed
      */
     private fastFillerPruneRoadCoord(coord: Coord) {
         let adjSpawn: boolean
@@ -851,7 +821,7 @@ export class RemotePlanner {
             if (coordData[0].structureType === STRUCTURE_SPAWN) adjSpawn = true
         })
 
-        if (adjSpawn) return RESULT_NO_ACTION
+        if (adjSpawn) return Result.noAction
 
         let cardinalRoads = 0
 
@@ -868,8 +838,8 @@ export class RemotePlanner {
             cardinalRoads += 1
         }
 
-        if (cardinalRoads >= 3) return RESULT_ACTION
-        return RESULT_NO_ACTION
+        if (cardinalRoads >= 3) return Result.action
+        return Result.noAction
     }
     /**
      * Has some issues, is disabled
@@ -890,7 +860,7 @@ export class RemotePlanner {
             const packedCoord = packAsNum(coord)
             if (this.roadCoords[packedCoord] !== 1) continue
 
-            if (this.fastFillerPruneRoadCoord(coord) === RESULT_ACTION) {
+            if (this.fastFillerPruneRoadCoord(coord) === Result.action) {
                 this.roadCoords[packedCoord] = 0
                 continue
             }
@@ -1285,7 +1255,7 @@ export class RemotePlanner {
             }
         })
 
-        if (!bestCoords.size) return RESULT_FAIL
+        if (!bestCoords.size) return Result.fail
 
         const centerUpgradePos = this.room.findClosestPos({
             coordMap: this.roadCoords,
@@ -1295,7 +1265,7 @@ export class RemotePlanner {
             },
         })
 
-        if (!centerUpgradePos) return RESULT_FAIL
+        if (!centerUpgradePos) return Result.fail
 
         const packedCoord = packAsNum(centerUpgradePos)
         this.setBasePlansXY(centerUpgradePos.x, centerUpgradePos.y, STRUCTURE_CONTAINER, 2)
@@ -1311,7 +1281,7 @@ export class RemotePlanner {
         this.baseCoords[packedCoord] = 255
 
         this.centerUpgradePos = centerUpgradePos
-        return RESULT_SUCCESS
+        return Result.success
     }
     private planGridCoords() {
         if (this.plannedGridCoords) return
@@ -1390,7 +1360,7 @@ export class RemotePlanner {
                         conditions: args.conditions,
                         dynamicWeight: args.dynamicWeight,
                     })
-                    if (!stampAnchor) return RESULT_FAIL
+                    if (!stampAnchor) return Result.fail
 
                     args.consequence(stampAnchor)
                     this.stampAnchors[args.stampType].push(stampAnchor)
@@ -1402,7 +1372,7 @@ export class RemotePlanner {
                     startCoords: args.startCoords,
                     conditions: args.conditions,
                 })
-                if (!stampAnchor) return RESULT_FAIL
+                if (!stampAnchor) return Result.fail
 
                 args.consequence(stampAnchor)
                 this.stampAnchors[args.stampType].push(stampAnchor)
@@ -1424,13 +1394,13 @@ export class RemotePlanner {
                 cardinalFlood: args.cardinalFlood,
                 coordMap: distanceCoords,
             })
-            if (!stampAnchor) return RESULT_FAIL
+            if (!stampAnchor) return Result.fail
 
             args.consequence(stampAnchor)
             this.stampAnchors[args.stampType].push(stampAnchor)
         }
 
-        return RESULT_SUCCESS
+        return Result.success
     }
     private findStampAnchor(args: FindStampAnchorArgs) {
         let visitedCoords = new Uint8Array(2500)
@@ -1843,7 +1813,7 @@ export class RemotePlanner {
         return this.fastFillerStartCoords[this.planAttempts.length]
     }
     private fastFiller() {
-        if (this.stampAnchors.fastFiller.length) return RESULT_NO_ACTION
+        if (this.stampAnchors.fastFiller.length) return Result.noAction
 
         for (const coord of findCoordsInRange(this.room.controller.pos, 2)) {
             this.baseCoords[packAsNum(coord)] = 255
@@ -1957,14 +1927,7 @@ export class RemotePlanner {
                         // It's not our first room, have a rampart planned to build the spawn under
 
                         if (i === 0 && !this.isStartRoom) {
-                            this.setRampartPlansXY(
-                                properCoord.x,
-                                properCoord.y,
-                                2,
-                                false,
-                                false,
-                                false,
-                            )
+
                         }
 
                         spawnCoords.splice(j, 1)
@@ -2610,7 +2573,6 @@ export class RemotePlanner {
             this.stampAnchors.minCutRampart.push(coord)
             /* this.roadCoords[packedCoord] = 1
             this.basePlans.setXY(coord.x, coord.y, STRUCTURE_ROAD, 4) */
-            this.setRampartPlansXY(coord.x, coord.y, 4, false, false, false)
         }
         /*
         for (const coord of contigiousProtectionCoords) this.room.coordVisual(coord.x, coord.y)
@@ -2783,7 +2745,6 @@ export class RemotePlanner {
                 if (unprotectedCoords[packedAdjCoord] === 255) return
 
                 if (!this.minCutCoords.has(packedAdjCoord) && getRange(coord, adjCoord) === 1) {
-                    this.setRampartPlansXY(adjCoord.x, adjCoord.y, 4, false, false, true)
                     this.rampartCoords[packedAdjCoord] = 1
 
                     addedMinCutRamparts.push(adjCoord)
@@ -2853,7 +2814,6 @@ export class RemotePlanner {
                 onboardingCoords.add(packedCoord)
                 this.rampartCoords[packedCoord] = 1
 
-                this.setRampartPlansXY(coord.x, coord.y, 4, false, false, forThreat)
 
                 onboardingCount += 1
                 if (forThreat) break
@@ -3076,7 +3036,6 @@ export class RemotePlanner {
         const packedCoord = packAsNum(coord)
         if (this.unprotectedCoords[packedCoord] === 0) return
 
-        this.setRampartPlansXY(coord.x, coord.y, 4, coversStructure, false, false)
         this.stampAnchors.shieldRampart.push(coord)
         this.rampartCoords[packedCoord] = 1
         this.unprotectedCoords[packedCoord] = 0
@@ -3125,7 +3084,6 @@ export class RemotePlanner {
                 if (this.rampartPlans.getXY(coord.x, coord.y)) continue
 
                 const isProtected = this.unprotectedCoords[packedNumCoord] === 0
-                this.setRampartPlansXY(coord.x, coord.y, data.minRCL, true, isProtected, false)
 
                 this.stampAnchors.shieldRampart.push(coord)
                 this.rampartCoords[packedNumCoord] = 1

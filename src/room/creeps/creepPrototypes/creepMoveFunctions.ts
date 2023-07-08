@@ -11,9 +11,8 @@ import {
     CreepMemoryKeys,
     RoomMemoryKeys,
     RoomTypes,
-    RESULT_NO_ACTION,
-    RESULT_FAIL,
-    RESULT_SUCCESS,
+    Result,
+    communeCreepRoles,
 } from 'international/constants'
 import { customFindPath } from 'international/customPathFinder'
 import { internationalManager } from 'international/international'
@@ -27,9 +26,10 @@ import {
     getRangeEuc,
     getRangeEucXY,
     getRange,
-    isCoordExit,
+    isExit,
     forCoordsAroundRange,
     forAdjacentCoords,
+    visualizePath,
 } from 'international/utils'
 import {
     packCoord,
@@ -117,7 +117,7 @@ PowerCreep.prototype.createMoveRequestByPath = Creep.prototype.createMoveRequest
                 const roomMemory = Memory.rooms[roomName]
 
                 if (Memory.rooms[roomName][RoomMemoryKeys.type] !== RoomTypes.remote) continue
-                if (!roomMemory[RoomMemoryKeys.abandon]) continue
+                if (!roomMemory[RoomMemoryKeys.abandonRemote]) continue
 
                 // The room is unsafe, don't use cached paths
 
@@ -156,12 +156,12 @@ PowerCreep.prototype.createMoveRequestByPath = Creep.prototype.createMoveRequest
 ) {
     // Stop if the we know the creep won't move
 
-    if (this.moveRequest) return RESULT_NO_ACTION
-    if (this.moved) return RESULT_NO_ACTION
-    if (this.fatigue > 0) return RESULT_NO_ACTION
+    if (this.moveRequest) return Result.noAction
+    if (this.moved) return Result.noAction
+    if (this.fatigue > 0) return Result.noAction
     if (this instanceof Creep && !this.getActiveBodyparts(MOVE)) {
         this.moved = 'moved'
-        return RESULT_NO_ACTION
+        return Result.noAction
     }
 
     if (this.room.enemyDamageThreat) return this.createMoveRequest(opts)
@@ -195,6 +195,8 @@ PowerCreep.prototype.createMoveRequestByPath = Creep.prototype.createMoveRequest
         const packedPath = pathOpts.packedPath.slice(posIndex + packedPosLength)
         const path = unpackPosList(packedPath)
 
+        visualizePath(path)
+
         this.room.targetVisual(this.pos, path[0])
 
         // If we're on an exit and the next pos is in the other room, wait
@@ -205,7 +207,7 @@ PowerCreep.prototype.createMoveRequestByPath = Creep.prototype.createMoveRequest
 
             this.memory[CreepMemoryKeys.path] = packedPath
             this.moved = 'moved'
-            return RESULT_SUCCESS
+            return Result.success
         }
 
         // If we have a remote, avoid abandoned remotes
@@ -221,7 +223,7 @@ PowerCreep.prototype.createMoveRequestByPath = Creep.prototype.createMoveRequest
                 const roomMemory = Memory.rooms[roomName]
 
                 if (Memory.rooms[roomName][RoomMemoryKeys.type] !== RoomTypes.remote) continue
-                if (!roomMemory[RoomMemoryKeys.abandon]) continue
+                if (!roomMemory[RoomMemoryKeys.abandonRemote]) continue
 
                 // The room is unsafe, don't use cached paths
 
@@ -233,7 +235,7 @@ PowerCreep.prototype.createMoveRequestByPath = Creep.prototype.createMoveRequest
 
         this.memory[CreepMemoryKeys.path] = packedPath
         this.assignMoveRequest(path[0])
-        return RESULT_SUCCESS
+        return Result.success
     }
 
     if (isOnLastPos || this.memory[CreepMemoryKeys.usedPathForGoal]) {
@@ -267,12 +269,12 @@ PowerCreep.prototype.createMoveRequest = Creep.prototype.createMoveRequest = fun
 
     // Stop if the we know the creep won't move
 
-    if (this.moveRequest) return RESULT_NO_ACTION
-    if (this.moved) return RESULT_NO_ACTION
-    if (this.fatigue > 0) return RESULT_NO_ACTION
+    if (this.moveRequest) return Result.noAction
+    if (this.moved) return Result.noAction
+    if (this.fatigue > 0) return Result.noAction
     if (this instanceof Creep && !this.getActiveBodyparts(MOVE)) {
         this.moved = 'moved'
-        return RESULT_NO_ACTION
+        return Result.noAction
     }
     /*
     if (this.spawning) return false
@@ -325,7 +327,7 @@ PowerCreep.prototype.createMoveRequest = Creep.prototype.createMoveRequest = fun
         // Generate a new path
 
         path = customFindPath(opts)
-        if (!path.length && !this.spawning) return RESULT_FAIL
+        if (!path.length && !this.spawning) return Result.fail
 
         // Limit the path's length to the cacheAmount
 
@@ -357,20 +359,20 @@ PowerCreep.prototype.createMoveRequest = Creep.prototype.createMoveRequest = fun
 
     // Stop if there are no positions left in the path
 
-    if (!path.length && !this.spawning) return RESULT_FAIL
+    if (!path.length && !this.spawning) return Result.fail
 
     // If visuals are enabled, visualize the path
 
     if (Memory.roomVisuals)
         path.length > 1
-            ? room.pathVisual(path, 'lightBlue')
+            ? visualizePath(path, customColors.lightBlue)
             : room.visual.line(this.pos, path[0], {
                   color: customColors.lightBlue,
                   opacity: 0.3,
               })
 
     if (path.length > 1) {
-        if (Memory.roomVisuals) room.pathVisual(path, 'lightBlue')
+        if (Memory.roomVisuals) visualizePath(path, customColors.lightBlue)
     } else {
         if (Memory.roomVisuals)
             room.visual.line(this.pos, path[0], {
@@ -397,7 +399,7 @@ PowerCreep.prototype.createMoveRequest = Creep.prototype.createMoveRequest = fun
         console.log('accessed spawnID', this.name, this.spawnID)
         // Ensure we aren't using the default direction
 
-        if (spawn.spawning.directions) return RESULT_SUCCESS
+        if (spawn.spawning.directions) return Result.success
 
         const adjacentCoords: Coord[] = []
 
@@ -428,18 +430,18 @@ PowerCreep.prototype.createMoveRequest = Creep.prototype.createMoveRequest = fun
         }
 
         spawn.spawning.setDirections(directions)
-        return RESULT_SUCCESS
+        return Result.success
     }
 
     if (path[0].roomName !== this.room.name) {
         this.moved = 'moved'
-        return RESULT_SUCCESS
+        return Result.success
     }
     this.assignMoveRequest(path[0])
 
     // Inform success
 
-    return RESULT_SUCCESS
+    return Result.success
 }
 
 PowerCreep.prototype.assignMoveRequest = Creep.prototype.assignMoveRequest = function (coord) {
@@ -481,14 +483,14 @@ PowerCreep.prototype.findShoveCoord = Creep.prototype.findShoveCoord = function 
  */
         if (avoidPackedCoords.has(packedCoord)) return
 
-        if (isCoordExit(coord)) return
+        if (isExit(coord)) return
 
         const terrainType = terrain.get(coord.x, coord.y)
         if (terrainType === TERRAIN_MASK_WALL) return
 
         let score: number
         if (targetCoord) {
-            score = getRangeEuc(coord, targetCoord)
+            score = getRangeEuc(coord, targetCoord) * 3
             if (terrainType === TERRAIN_MASK_SWAMP) score += 1
             if (room.creepPositions[packedCoord] || room.powerCreepPositions[packedCoord])
                 score += 1
@@ -510,7 +512,7 @@ PowerCreep.prototype.findShoveCoord = Creep.prototype.findShoveCoord = function 
                 structure => structure.structureType === STRUCTURE_RAMPART,
             )
         )
-        return
+            return
 
         let hasImpassibleStructure
 
@@ -635,6 +637,7 @@ PowerCreep.prototype.recurseMoveRequest = Creep.prototype.recurseMoveRequest = f
 ) {
     const { room } = this
 
+    if (this.spawning) return
     if (!this.moveRequest) return
     if (!room.moveRequests[this.moveRequest]) {
         this.moved = 'moved'
@@ -653,7 +656,7 @@ PowerCreep.prototype.recurseMoveRequest = Creep.prototype.recurseMoveRequest = f
     // If there is no creep at the pos
 
     if (!creepNameAtPos) {
-        if (this.spawning) {
+        /*         if (this.spawning) {
             this.moved = this.moveRequest
             delete room.moveRequests[this.moveRequest]
 
@@ -667,7 +670,7 @@ PowerCreep.prototype.recurseMoveRequest = Creep.prototype.recurseMoveRequest = f
             }
             return
         }
-
+ */
         // loop through each index of the queue, drawing visuals
 
         if (Memory.roomVisuals) {
@@ -691,27 +694,26 @@ PowerCreep.prototype.recurseMoveRequest = Creep.prototype.recurseMoveRequest = f
         // Have each member of the queue run its moveRequest
 
         for (let index = queue.length - 1; index >= 0; index--) {
-
-            (Game.creeps[queue[index]] || Game.powerCreeps[queue[index]]).runMoveRequest()
+            ;(Game.creeps[queue[index]] || Game.powerCreeps[queue[index]]).runMoveRequest()
         }
 
         return
     }
 
     const packedCoord = packCoord(this.pos)
-
     // Get the creepAtPos with the name
-
     const creepAtPos = Game.creeps[creepNameAtPos] || Game.powerCreeps[creepNameAtPos]
 
     // if creepAtPos is fatigued it is useless to us
 
     if ((creepAtPos as Creep).fatigue > 0) {
+        this.moved = 'wait'
+
         delete room.moveRequests[this.moved]
         delete this.moveRequest
         return
     }
-
+    /*
     // We're spawning, just get us space to move into
 
     if (this.spawning) {
@@ -734,7 +736,7 @@ PowerCreep.prototype.recurseMoveRequest = Creep.prototype.recurseMoveRequest = f
 
         return
     }
-
+ */
     if (creepAtPos.moved) {
         if (creepAtPos.moved === 'moved') {
             delete this.moveRequest
@@ -749,17 +751,21 @@ PowerCreep.prototype.recurseMoveRequest = Creep.prototype.recurseMoveRequest = f
                 return
             }
 
-            // Don't allow swapping in the wait queue if we are in a commune
+            // Don't allow swapping in the queue if we might move a creep out of the commune
+            // Will trade if:
+            // remotes are different
+            // sourceIndexes are different
+            // Traffic priorities are by default different
+            // One is around empty while the other is around full
 
             if (
-                Memory.rooms[this.room.name][RoomMemoryKeys.type] !== RoomTypes.commune &&
+                (!this.isOnExit || !communeCreepRoles.has(creepAtPos.role)) &&
                 (this.memory[CreepMemoryKeys.remote] !==
                     creepAtPos.memory[CreepMemoryKeys.remote] ||
                     this.memory[CreepMemoryKeys.sourceIndex] !==
                         creepAtPos.memory[CreepMemoryKeys.sourceIndex] ||
-                    TrafficPriorities[this.role] + (this.freeNextStore === 0 ? 0.1 : 0) >
-                        TrafficPriorities[creepAtPos.role] +
-                            (creepAtPos.freeNextStore === 0 ? 0.1 : 0))
+                    TrafficPriorities[this.role] + (this.needsResources() ? 0.1 : 0) >
+                        TrafficPriorities[creepAtPos.role] + (this.needsResources() ? 0.1 : 0))
             ) {
                 // Have the creep move to its moveRequest
 
@@ -850,20 +856,13 @@ PowerCreep.prototype.recurseMoveRequest = Creep.prototype.recurseMoveRequest = f
                     fill: customColors.teal,
                     opacity: 0.2,
                 })
-
+            /*
             // Culprit for relay issues?
 
             this.room.visual.text('R', this.pos)
 
-            for (const creep of [this, creepAtPos] as Creep[]) {
-                if (creep.role !== 'remoteReserver') continue
-
-                this.room.visual.poly(unpackPosList(creepAtPos.memory[CreepMemoryKeys.path]))
-                break
-            }
-
             this.room.targetVisual(creepAtPos.pos, unpackCoord(creepAtPos.moveRequest), true)
-
+ */
             // Have the creep move to its moveRequest
 
             this.runMoveRequest()
@@ -884,8 +883,8 @@ PowerCreep.prototype.recurseMoveRequest = Creep.prototype.recurseMoveRequest = f
 
             if (
                 !(creepAtPos instanceof PowerCreep) &&
-                TrafficPriorities[this.role] + (this.freeNextStore === 0 ? 0.1 : 0) >
-                    TrafficPriorities[creepAtPos.role] + (creepAtPos.freeNextStore === 0 ? 0.1 : 0)
+                TrafficPriorities[this.role] + (this.needsResources() ? 0.1 : 0) >
+                    TrafficPriorities[creepAtPos.role] + (this.needsResources() ? 0.1 : 0)
             ) {
                 this.runMoveRequest()
 
@@ -903,12 +902,13 @@ PowerCreep.prototype.recurseMoveRequest = Creep.prototype.recurseMoveRequest = f
         }
 
         // Swap if creep has higher priority than creepAtPos
-
+        /*
         if (
-            !this.isOnExit &&
-            (creepAtPos instanceof PowerCreep ||
-                TrafficPriorities[this.role] + (this.freeNextStore === 0 ? 0.1 : 0) >
-                    TrafficPriorities[creepAtPos.role] + (creepAtPos.freeNextStore === 0 ? 0.1 : 0))
+            !(creepAtPos instanceof PowerCreep) &&
+            (!this.isOnExit ||
+                !communeCreepRoles.has(creepAtPos.role)) &&
+            (TrafficPriorities[this.role] + (this.needsResources() ? 0.1 : 0) >
+                TrafficPriorities[creepAtPos.role] + (this.needsResources() ? 0.1 : 0))
         ) {
             if (Memory.roomVisuals)
                 room.visual.rect(creepAtPos.pos.x - 0.5, creepAtPos.pos.y - 0.5, 1, 1, {
@@ -918,18 +918,6 @@ PowerCreep.prototype.recurseMoveRequest = Creep.prototype.recurseMoveRequest = f
 
             this.runMoveRequest()
 
-            // Potential culprit for relay bug
-
-            /* this.room.visual.text('P', this.pos) */
-            /*
-            for (const creep of [this, creepAtPos] as Creep[]) {
-
-                if (creep.role !== 'remoteReserver') continue
-
-                this.room.visual.poly(unpackPosList(this.memory[CreepMemoryKeys.path]))
-                break
-            }
- */
             // Have the creepAtPos move to the creep and inform true
 
             creepAtPos.moveRequest = packedCoord
@@ -937,7 +925,7 @@ PowerCreep.prototype.recurseMoveRequest = Creep.prototype.recurseMoveRequest = f
             creepAtPos.runMoveRequest()
             return
         }
-
+ */
         // If the creepAtPos is in the queue
 
         if (queue.includes(creepAtPos.name)) {

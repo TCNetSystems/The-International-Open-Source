@@ -177,6 +177,10 @@ export enum RoomTypes {
 export enum RoomMemoryKeys {
     type,
     lastScout,
+    /**
+     * Tells (mostly civilians) if the room is safe (non-undefined number) and what tick it will refresh
+     */
+    danger,
 
     // Types specific
 
@@ -217,7 +221,10 @@ export enum RoomMemoryKeys {
     minHaulerCost,
     minHaulerCostUpdate,
     greatestRCL,
-    abandoned,
+    /**
+     * Wether or not we are trying to have the room go from commune to neutral
+     */
+    abandonCommune,
     marketData,
     factoryProduct,
     factoryUsableResources,
@@ -232,7 +239,8 @@ export enum RoomMemoryKeys {
     remoteCoreAttacker,
     remoteBuilder,
     remoteDismantler,
-    abandon,
+    abandonRemote,
+    recursedAbandonment,
     use,
     enemyReserved,
     invaderCore,
@@ -243,12 +251,20 @@ export enum RoomMemoryKeys {
     remoteControllerPositions,
     remoteSources,
     remoteSourceHarvestPositions,
-    remoteSourcePaths,
+    remoteSourceFastFillerPaths,
+    remoteSourceHubPaths,
     clearedEnemyStructures,
     lastStructureCheck,
     roadsQuota,
     roads,
     remoteSourceCredit,
+    remoteSourceCreditChange,
+    remoteSourceCreditReservation,
+    hasContainer,
+    /**
+     * The names of the rooms the remote has paths through to get to the commune
+     */
+    pathsThrough,
 
     // Ally
 
@@ -270,6 +286,9 @@ export enum RoomMemoryKeys {
 export const mmoShardNames = new Set(['shard0', 'shard1', 'shard2', 'shard3'])
 
 export const roomTypeProperties: Set<keyof RoomMemory> = new Set([
+
+    // Commune
+    
     RoomMemoryKeys.remotes,
     RoomMemoryKeys.deposits,
     RoomMemoryKeys.powerBanks,
@@ -277,17 +296,30 @@ export const roomTypeProperties: Set<keyof RoomMemory> = new Set([
     RoomMemoryKeys.minHaulerCostUpdate,
     RoomMemoryKeys.threatened,
     RoomMemoryKeys.lastAttacked,
-    RoomMemoryKeys.abandoned,
+    RoomMemoryKeys.abandonCommune,
     RoomMemoryKeys.score,
     RoomMemoryKeys.dynamicScore,
     RoomMemoryKeys.dynamicScoreUpdate,
     RoomMemoryKeys.clearedEnemyStructures,
 
+    // Remote
+
     RoomMemoryKeys.commune,
+    RoomMemoryKeys.remoteSourceFastFillerPaths,
+    RoomMemoryKeys.remoteSourceHubPaths,
     RoomMemoryKeys.remoteSourceCredit,
+    RoomMemoryKeys.remoteSourceCreditChange,
+    RoomMemoryKeys.remoteSourceCreditReservation,
+    RoomMemoryKeys.abandonRemote,
+    RoomMemoryKeys.recursedAbandonment,
+    RoomMemoryKeys.pathsThrough,
+
+    // Ally and Enemy
 
     RoomMemoryKeys.owner,
     RoomMemoryKeys.RCL,
+
+    // Enemy
 
     RoomMemoryKeys.powerEnabled,
     RoomMemoryKeys.towers,
@@ -308,13 +340,23 @@ export const roomTypes: Record<RoomTypes, Set<keyof RoomMemory>> = {
         RoomMemoryKeys.minHaulerCostUpdate,
         RoomMemoryKeys.threatened,
         RoomMemoryKeys.lastAttacked,
-        RoomMemoryKeys.abandoned,
+        RoomMemoryKeys.abandonCommune,
         RoomMemoryKeys.score,
         RoomMemoryKeys.dynamicScore,
         RoomMemoryKeys.dynamicScoreUpdate,
         RoomMemoryKeys.clearedEnemyStructures,
     ]),
-    [RoomTypes.remote]: new Set([RoomMemoryKeys.commune, RoomMemoryKeys.remoteSourceCredit]),
+    [RoomTypes.remote]: new Set([
+        RoomMemoryKeys.commune,
+        RoomMemoryKeys.remoteSourceFastFillerPaths,
+        RoomMemoryKeys.remoteSourceHubPaths,
+        RoomMemoryKeys.remoteSourceCredit,
+        RoomMemoryKeys.remoteSourceCreditChange,
+        RoomMemoryKeys.remoteSourceCreditReservation,
+        RoomMemoryKeys.abandonRemote,
+        RoomMemoryKeys.recursedAbandonment,
+        RoomMemoryKeys.pathsThrough,
+    ]),
     [RoomTypes.ally]: new Set([RoomMemoryKeys.owner, RoomMemoryKeys.RCL]),
     [RoomTypes.allyRemote]: new Set([RoomMemoryKeys.owner]),
     [RoomTypes.enemy]: new Set([
@@ -389,8 +431,24 @@ export const roomLogisticsRoles: Set<CreepRoles> = new Set([
     'allyVanguard',
 ])
 
+export const communeCreepRoles: Set<CreepRoles> = new Set([
+    'sourceHarvester',
+    'hauler',
+    'builder',
+    'maintainer',
+    'controllerUpgrader',
+    'hubHauler',
+    'fastFiller',
+    'mineralHarvester',
+    'meleeDefender',
+    'rangedDefender',
+])
+
 export const powerCreepClassNames: PowerClassConstant[] = ['operator']
 
+/**
+ * Which role gets priority in which circumstance. Lowest to highest
+ */
 export enum TrafficPriorities {
     remoteHauler,
     hauler,
@@ -401,10 +459,10 @@ export enum TrafficPriorities {
     sourceHarvester,
     mineralHarvester,
     remoteSourceHarvester,
+    remoteCoreAttacker,
+    remoteDismantler,
     remoteReserver,
     remoteBuilder,
-    remoteDismantler,
-    remoteCoreAttacker,
     vanguard,
     allyVanguard,
     controllerUpgrader,
@@ -1062,7 +1120,7 @@ export const terminalResourceTargets: Partial<{ [key in ResourceConstant]: Resou
             return communeManager.storingStructuresCapacity * 0.01
         },
     },
-    [RESOURCE_UTRIUM_HYDRIDE]: {
+    [RESOURCE_UTRIUM_OXIDE]: {
         min: function (communeManager) {
             return 0
         },
@@ -1200,6 +1258,7 @@ export const safemodeTargets: StructureConstant[] = [
     STRUCTURE_STORAGE,
     STRUCTURE_TERMINAL,
 ]
+export const safemodeTargetsSet = new Set(safemodeTargets)
 
 /**
  * The number of ticks to wait between hauler size updates
@@ -1381,14 +1440,13 @@ export const quadAttackMemberOffsets = [
 ]
 export const packedQuadAttackMemberOffsets = quadAttackMemberOffsets.map(coord => packCoord(coord))
 
-export const RESULT_FAIL = 0
-export const RESULT_SUCCESS = 1
-export const RESULT_ACTION = 2
-export const RESULT_NO_ACTION = 3
-/**
- * Wether there was success or fail is irrelevant. Stop future action
- */
-export const RESULT_STOP = 4
+export enum Result {
+    fail,
+    success,
+    action,
+    noAction,
+    stop,
+}
 
 export const maxRemoteRoomDistance = 5
 export const offsetsByDirection = [

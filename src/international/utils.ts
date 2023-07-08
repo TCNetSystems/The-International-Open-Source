@@ -196,7 +196,7 @@ export function newID() {
 
 interface AdvancedFindDistanceOpts {
     typeWeights?: { [key: string]: number }
-    avoidAbandonedRemotes?: boolean
+    avoidDanger?: boolean
 }
 
 /**
@@ -217,11 +217,8 @@ export function advancedFindDistance(
                 return 50
             }
 
-            if (
-                opts.avoidAbandonedRemotes &&
-                roomMemory[RoomMemoryKeys.type] === RoomTypes.remote
-            ) {
-                if (roomMemory[RoomMemoryKeys.abandon]) {
+            if (opts.avoidDanger && roomMemory[RoomMemoryKeys.type] === RoomTypes.remote) {
+                if (roomMemory[RoomMemoryKeys.abandonRemote]) {
                     return 30
                 }
             }
@@ -625,7 +622,7 @@ export function isXYExit(x: number, y: number) {
     return x <= 0 || x >= roomDimensions - 1 || y <= 0 || y >= roomDimensions - 1
 }
 
-export function isCoordExit(coord: Coord) {
+export function isExit(coord: Coord) {
     return (
         coord.x <= 0 ||
         coord.x >= roomDimensions - 1 ||
@@ -639,7 +636,6 @@ export function randomTick(max: number = 20) {
 }
 
 export function randomChance(number: number = 10) {
-
     return Math.floor(Math.random() * number) === number
 }
 
@@ -850,11 +846,12 @@ export function splitStringAt(string: string, index: number) {
     return [string.slice(0, index), string.slice(index)]
 }
 
-export function findHighestScore<T>(iter: T[], f: (val: T) => number): number {
+export function findHighestScore<T>(iter: T[], f: (val: T) => number | false): number {
     let highestScore = 0
 
     for (const val of iter) {
         const score = f(val)
+        if (score === false) continue
         if (score <= highestScore) continue
 
         highestScore = score
@@ -863,11 +860,28 @@ export function findHighestScore<T>(iter: T[], f: (val: T) => number): number {
     return highestScore
 }
 
-export function findLowestScore<T>(iter: T[], f: (val: T) => number): number {
-    let lowestScore = 0
+export function findWithHighestScore<T>(iter: T[], f: (val: T) => number | false): [number, T | undefined] {
+    let highestScore = 0
+    let bestVal: T | undefined
 
     for (const val of iter) {
         const score = f(val)
+        if (score === false) continue
+        if (score <= highestScore) continue
+
+        highestScore = score
+        bestVal = val
+    }
+
+    return [highestScore, bestVal]
+}
+
+export function findLowestScore<T>(iter: T[], f: (val: T) => number | false): number {
+    let lowestScore = Infinity
+
+    for (const val of iter) {
+        const score = f(val)
+        if (score === false) continue
         if (score >= lowestScore) continue
 
         lowestScore = score
@@ -876,74 +890,20 @@ export function findLowestScore<T>(iter: T[], f: (val: T) => number): number {
     return lowestScore
 }
 
-export function findDynamicScore(roomName: string) {
-    let dynamicScore = 0
+export function findWithLowestScore<T>(iter: T[], f: (val: T) => number | false): [number, T | undefined] {
+    let lowestScore = Infinity
+    let bestVal: T | undefined
 
-    let closestEnemy = 0
-    let communeScore = 0
-    let allyScore = 0
+    for (const val of iter) {
+        const score = f(val)
+        if (score === false) continue
+        if (score >= lowestScore) continue
 
-    const roomCoord = makeRoomCoord(roomName)
-    forRoomNamesAroundRangeXY(roomCoord.x, roomCoord.y, dynamicScoreRoomRange, (x, y) => {
-        const searchRoomName = roomNameFromRoomXY(x, y)
-        const searchRoomMemory = Memory.rooms[searchRoomName]
-        if (!searchRoomMemory) return
+        lowestScore = score
+        bestVal = val
+    }
 
-        if (searchRoomMemory[RoomMemoryKeys.type] === RoomTypes.enemy) {
-            const score = advancedFindDistance(roomName, searchRoomName)
-            if (score <= closestEnemy) return
-
-            closestEnemy = score
-            return
-        }
-
-        if (searchRoomMemory[RoomMemoryKeys.type] === RoomTypes.commune) {
-            const searchRoom = Game.rooms[searchRoomName]
-            if (!searchRoom) return
-
-            const score =
-                Math.pow(
-                    Math.abs(
-                        advancedFindDistance(roomName, searchRoomName) - preferredCommuneRange,
-                    ),
-                    1.5,
-                ) +
-                (maxControllerLevel - searchRoom.controller.level)
-            if (score <= communeScore) return
-
-            communeScore = score
-            return
-        }
-
-        if (searchRoomMemory[RoomMemoryKeys.type] === RoomTypes.ally) {
-            const score =
-                Math.pow(
-                    Math.abs(
-                        advancedFindDistance(roomName, searchRoomName) - preferredCommuneRange,
-                    ),
-                    1.5,
-                ) +
-                (searchRoomMemory[RoomMemoryKeys.RCL] || 0) * 0.3
-            if (score <= allyScore) return
-
-            allyScore = score
-            return
-        }
-    })
-
-    dynamicScore += Math.round(Math.pow(closestEnemy, -0.8) * 25)
-    dynamicScore += Math.round(communeScore * 5)
-    dynamicScore += allyScore
-
-    // Prefer minerals with below average communes
-
-    const roomMemory = Memory.rooms[roomName]
-    const mineralType = roomMemory[RoomMemoryKeys.mineralType]
-    const mineralScore = internationalManager.mineralCommunes[mineralType] - internationalManager.avgCommunesPerMineral
-    dynamicScore += mineralScore * 40
-
-    roomMemory[RoomMemoryKeys.dynamicScore] = dynamicScore
-    roomMemory[RoomMemoryKeys.dynamicScoreUpdate] = Game.time
+    return [lowestScore, bestVal]
 }
 
 /**
@@ -957,6 +917,25 @@ export function sortBy<T>(array: T[], score: (t: T) => number, reversed?: true):
 }
 
 export function randomOf<T>(array: T[]): T {
-
     return array[Math.floor(Math.random() * array.length)]
+}
+
+export function visualizePath(
+    path: RoomPosition[],
+    color: string = customColors.yellow,
+    visualize: boolean = Memory.roomVisuals,
+) {
+    if (!visualize) return
+
+    for (let i = 0; i < path.length; i++) {
+        const nextPos = path[i + 1]
+        if (!nextPos) break
+        const pos = path[i]
+        if (nextPos.roomName !== pos.roomName) continue
+
+        new RoomVisual(pos.roomName).line(pos, nextPos, {
+            color,
+            opacity: 0.2,
+        })
+    }
 }

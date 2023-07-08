@@ -1,4 +1,4 @@
-import { WorkRequestKeys, CreepMemoryKeys, RESULT_FAIL, RoomTypes } from 'international/constants'
+import { WorkRequestKeys, CreepMemoryKeys, Result, RoomTypes } from 'international/constants'
 import { findObjectWithID, getRangeXY, getRange } from 'international/utils'
 import { unpackCoord } from 'other/codec'
 
@@ -79,13 +79,12 @@ export class Vanguard extends Creep {
     }
 
     findRampartTarget?() {
-
         const creepMemory = Memory.creeps[this.name]
         if (creepMemory[CreepMemoryKeys.targetID]) {
-
-            const rampartTarget = Game.getObjectById(creepMemory[CreepMemoryKeys.targetID]) as StructureRampart
+            const rampartTarget = Game.getObjectById(
+                creepMemory[CreepMemoryKeys.targetID],
+            ) as StructureRampart
             if (rampartTarget && rampartTarget instanceof StructureRampart) {
-
                 return rampartTarget
             }
         }
@@ -194,7 +193,7 @@ export class Vanguard extends Creep {
                     [RoomTypes.ally]: Infinity,
                     [RoomTypes.keeper]: Infinity,
                 },
-            }) === RESULT_FAIL
+            }) === Result.fail
         ) {
             const request = Memory.workRequests[this.memory[CreepMemoryKeys.taskRoom]]
             if (request) request[WorkRequestKeys.abandon] = 20000
